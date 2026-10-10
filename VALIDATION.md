@@ -1,3 +1,11 @@
+# 1.0.0 首个正式版（2026-10-10）
+
+- 将当前版本定为首个正式版，`versionName` 为 `1.0.0`、`versionCode` 从 23 递增至 24；后续修复从 1.0.1 继续。
+- `:app:assembleRelease` 成功，包含 `lintVitalRelease` 检查；APK 元数据确认版本为 1.0.0 / 24，`debuggable` 为 false。
+- 在本机使用既有开发证书签署 release APK。`apksigner verify` 通过，证书 SHA-256 与已发布 0.5.5 一致，签名私钥不进入仓库。手机 `adb install -r` 覆盖安装成功，系统包信息确认安装版本为 1.0.0 / 24，主界面与计算历史可正常打开。
+- 安装前保存当前完整偏好备份；测试期间观察到新的计算内容，未使用旧备份覆盖手机数据。本轮未修改计算、历史或设置逻辑。
+- 正式 APK SHA-256：`43de3a1aa28f089298c6e9280177c548e0dedb0d487758304ad4cae4724c3044`。
+
 # 0.5.5 公开源码与仓库入口（2026-10-10）
 
 - 关于页面增加 `https://github.com/azxtop/SciCalc` 仓库入口；版本号改读 `BuildConfig.VERSION_NAME`，原有关于入口统一进入同一页面。

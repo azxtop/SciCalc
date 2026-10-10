@@ -4,7 +4,9 @@
 
 源码：[azxtop/SciCalc](https://github.com/azxtop/SciCalc) · 下载：[GitHub Releases](https://github.com/azxtop/SciCalc/releases) · 许可证：[GPL-3.0-or-later](LICENSE)
 
-## 当前版本 0.5.5
+## 当前正式版 1.0.0
+
+1.0.0 是首个正式版本，以现有功能和交互作为后续更新的基线。修复从 1.0.1 继续，新功能按 1.x.0 递增。
 
 三横杠菜单 → 顶部“关于应用”图标 → **GitHub 仓库**，可在浏览器中打开项目源码。设置页右上角 → 关于与开源组件，也可进入同一页面。关于页面的版本号随构建自动更新。
 
@@ -126,7 +128,7 @@
 
 ## 当前边界
 
-这是开发测试版本，**尚不宣称所有界面与功能达到 CalcES 1:1**。0.4.1 修正了自然公式的根号轮廓、黑色占位框和分数间距，完成计算后保留输入字号，并去掉 PRO 键。设置分为六个标签页；函数、矩阵、向量、统计、常数、复数、分布与数字格式采用参考页面布局。基数使用专用键盘，数字表使用五步输入，多项式和方程组使用系数表；原版基线与本版验证见 [KEY_FUNCTION_AUDIT.md](KEY_FUNCTION_AUDIT.md)、[VALIDATION.md](VALIDATION.md)。子页面、字体、图标、状态锁定规则与原版仍有差异；函数目录未逐项进行全参数边界验证。
+当前正式版**尚不宣称所有界面与功能达到 CalcES 1:1**。0.4.1 修正了自然公式的根号轮廓、黑色占位框和分数间距，完成计算后保留输入字号，并去掉 PRO 键。设置分为六个标签页；函数、矩阵、向量、统计、常数、复数、分布与数字格式采用参考页面布局。基数使用专用键盘，数字表使用五步输入，多项式和方程组使用系数表；原版基线与本版验证见 [KEY_FUNCTION_AUDIT.md](KEY_FUNCTION_AUDIT.md)、[VALIDATION.md](VALIDATION.md)。子页面、字体、图标、状态锁定规则与原版仍有差异；函数目录未逐项进行全参数边界验证。
 OCR 使用本地 Latin 文本模型。清晰的单行算式已验证；二维分数、复杂上下标、手写和多行排版需检查识别结果，尚不能保证与原版数学 OCR 的识别能力相同。
 绘图参数/极坐标范围为 0~2π，隐式图使用数值网格，区间极值为采样与局部优化结果。
 脚本使用 Symja 表达式语言，单次最多 8 秒；脚本状态与主计算器变量隔离，草稿和命名脚本保存在本机。
@@ -155,7 +157,9 @@ Linux / macOS：
 ./gradlew :app:assembleDebug :app:testDebugUnitTest --console=plain
 ```
 
-APK 输出到 `app/build/outputs/apk/debug/app-debug.apk`。预编译开发测试包从 [Releases](https://github.com/azxtop/SciCalc/releases) 下载；使用 debug 签名，不含发布私钥。自行构建的包与已安装包签名不一致时无法直接覆盖安装。
+APK 输出到 `app/build/outputs/apk/debug/app-debug.apk`。正式安装包从 [Releases](https://github.com/azxtop/SciCalc/releases/latest) 下载；1.0.0 使用 release 构建并沿用既有版本的本机开发证书签名，以支持直接覆盖升级，APK 不含私钥。自行构建的包与已安装包签名不一致时无法直接覆盖安装。
+
+`./gradlew :app:assembleRelease` 可生成未签名的 release APK，位于 `app/build/outputs/apk/release/`，签名密钥需自行配置。
 
 `tools/touchprobe` 是可选的 ADB 触摸测试辅助模块，`tools/generate_feedback_audio.py` 可重新生成原创按键音效。构建与实机记录见 [VALIDATION.md](VALIDATION.md)、[UI_REVIEW.md](UI_REVIEW.md)。本地截图、设备备份、计算历史、构建缓存和诊断快照不包含在公开仓库中。
 
