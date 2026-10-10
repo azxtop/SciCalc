@@ -1,0 +1,21 @@
+.gradle/
+**/build/
+local.properties
+captures/
+dist/
+.idea/
+.vscode/
+*.iml
+*.apk
+*.aab
+*.jks
+*.keystore
+.env
+.env.*
+__pycache__/
+*.py[cod]
+
+# Device-specific QA scripts and source snapshots stay local.
+tools/*
+!tools/generate_feedback_audio.py
+!tools/touchprobe/

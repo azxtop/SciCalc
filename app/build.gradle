@@ -1,0 +1,24 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'com.az.scicalc'
+    compileSdk 36
+    defaultConfig {
+        applicationId 'com.az.scicalc'; minSdk 31; targetSdk 35; versionCode 23; versionName '0.5.5'
+        buildConfigField 'String', 'GITHUB_REPOSITORY_URL', '"https://github.com/azxtop/SciCalc"'
+    }
+    buildFeatures { buildConfig = true }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17; coreLibraryDesugaringEnabled true }
+    packaging { resources { excludes += ['META-INF/DEPENDENCIES', 'META-INF/INDEX.LIST']; pickFirsts += ['META-INF/*.md', 'META-INF/*.txt', '**/*.xsd', '**/Messages.properties', '**/Log4j2Plugins.dat', 'META-INF/versions/9/OSGI-INF/MANIFEST.MF'] } }
+    testOptions { unitTests.returnDefaultValues = true }
+}
+configurations.configureEach { exclude group: 'org.apache.logging.log4j', module: 'log4j-core' }
+dependencies {
+    implementation 'com.google.mlkit:text-recognition:16.0.1'
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
+    implementation('org.matheclipse:matheclipse-core:3.2.0') { exclude group: 'com.google.guava', module: 'guava' }
+    implementation 'com.google.guava:guava:33.5.0-android'
+    implementation 'org.apache.logging.log4j:log4j-api:2.17.2'
+    runtimeOnly 'com.celeral:log4j2-android:1.0.0'
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
+}

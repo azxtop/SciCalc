@@ -1,0 +1,4 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:label="Interaction Probe" android:theme="@android:style/Theme.Material.Light.NoActionBar" />
+    <instrumentation android:name="com.az.touchprobe.Probe" android:targetPackage="com.az.touchprobe" android:label="Multi pointer input probe" />
+</manifest>

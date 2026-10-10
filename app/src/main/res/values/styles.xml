@@ -1,0 +1,27 @@
+<resources>
+    <style name="ReferenceHelpTheme" parent="android:style/Theme.Material.Dialog.Alert">
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:colorAccent">#B488FF</item>
+        <item name="android:windowBackground">#424242</item>
+        <item name="android:colorBackground">#424242</item>
+        <item name="android:textColorPrimary">#E4E1E8</item>
+        <item name="android:windowMinWidthMajor">87%</item>
+        <item name="android:windowMinWidthMinor">87%</item>
+    </style>
+    <style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item><item name="android:colorAccent">#B08AFF</item>
+        <item name="android:windowLightStatusBar">false</item><item name="android:statusBarColor">#13171C</item>
+        <item name="android:navigationBarColor">#13171C</item><item name="android:windowLightNavigationBar">false</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
+    <style name="ToolDialogTheme" parent="android:style/Theme.Material.Dialog.Alert">
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:colorAccent">#B488FF</item>
+        <item name="android:windowBackground">#20282D</item>
+        <item name="android:colorBackground">#20282D</item>
+        <item name="android:textColorPrimary">#D7D3DE</item>
+        <item name="android:textColorSecondary">#C9C5D1</item>
+        <item name="android:windowMinWidthMajor">87%</item>
+        <item name="android:windowMinWidthMinor">87%</item>
+    </style>
+</resources>

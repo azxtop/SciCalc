@@ -1,0 +1,11 @@
+package com.az.scicalc;
+import org.junit.Test;
+import static org.junit.Assert.*;
+
+public class MathEngineTest {
+    @Test public void complexMenuRespectsAngleUnits(){MathEngine e=new MathEngine();Formula f=new Formula();f.call("Arg",1);f.text("1+");f.symbol("I");assertEquals("45",e.evaluate(f.source(0),false));assertEquals("50",e.evaluate(f.source(2),false));assertEquals(Math.PI/4,e.value(f.source(1)),1e-12);f.clear();f.call("Conjg",1);f.text("3+4*");f.symbol("I");assertEquals("3-I*4",e.evaluate(f.source(0),false));}
+    @Test public void exactArithmeticAndCalculus(){MathEngine e=new MathEngine();assertEquals("5/6",e.evaluate("1/2+1/3",false));assertEquals("2*Sqrt(2)",e.evaluate("Sqrt(8)",false));assertEquals("2*x",e.evaluate("D(x^2,x)",false));assertEquals("1/3",e.evaluate("Integrate(x^2,{x,0,1})",false));assertEquals("1",e.evaluate("Limit(Sin(x)/x,x->0)",false));}
+    @Test public void advancedCategories(){MathEngine e=new MathEngine();String roots=e.evaluate("Solve(x^2-5*x+6==0,x)",false);assertTrue(roots,roots.contains("2")&&roots.contains("3"));assertEquals("-2",e.evaluate("Det({{1,2},{3,4}})",false));assertEquals("{{-2,1},{3/2,-1/2}}",e.evaluate("Inverse({{1,2},{3,4}})",false).replaceAll("\\s", ""));assertEquals("{0,0,1}",e.evaluate("Cross({1,0,0},{0,1,0})",false));assertEquals("3",e.evaluate("Mean({1,2,3,4,5})",false));assertEquals("63/256",e.evaluate("PDF(BinomialDistribution(10,1/2),5)",false));assertEquals("5",e.evaluate("Abs(3+4*I)",false));}
+    @Test public void numericAndErrors(){MathEngine e=new MathEngine();assertEquals(.5,e.value("Sin(Pi/6)"),1e-12);assertTrue(e.evaluate("1/0",false).contains("Infinity"));try{e.evaluate("Sin(",false);fail("invalid expression");}catch(Exception expected){}}
+    @Test public void extendedTools(){MathEngine e=new MathEngine();assertEquals("-2",e.evaluate("Surd(-8,3)",false));assertEquals(6,e.value(e.evaluate("Fit({{1,2},{2,4},{3,6}},{1,x},x)",false).replace("x","3")),1e-10);assertTrue(e.evaluate("Reduce(x^2-4<0,x,Reals)",false).contains("2"));assertEquals(.5,e.value("CDF(NormalDistribution(0,1),0)"),1e-12);assertEquals(1.95996398454,e.value("InverseCDF(NormalDistribution(0,1),0.975)"),1e-8);assertEquals("1/2",e.evaluate("Sin(30*Pi/180)",false));assertEquals("{1,4,9}",e.evaluate("Table(n^2,{n,1,3})",false));}
+}
