@@ -9,23 +9,26 @@ import java.util.*;
 final class ResultFormats {
  static void open(MainActivity app,int index){
   if(index>=app.view.tape.size())return;
-  if(index>=0){load(app,app.view.tape.get(index).exact,index);return;}
-  if(!app.exact.isEmpty()){load(app,app.exact,index);return;}
+  int navigation=app.menuTools.navigationToken();
+  if(index>=0){load(app,app.view.tape.get(index).exact,index,navigation);return;}
+  if(!app.exact.isEmpty()){load(app,app.exact,index,navigation);return;}
   if(app.formula.empty()||!app.formula.complete()||app.view.result.isEmpty())return;
   String source=app.vars(app.formula.calculationSource(app.angleMode,app.prefs.getBoolean("implicitPriority",true)));
-  app.task(()->app.engine.evaluate(source,false),value->load(app,value,index));
+  app.task(()->app.engine.evaluate(source,false),value->load(app,value,index,navigation));
  }
- private static void load(MainActivity app,String exact,int index){
-  float anchor=app.view.resultMenuTop;
-  app.task(()->new org.json.JSONObject(ResultForms.values(app.engine,exact,app.prefs.getInt("digits",11))).toString(),json->{
-   try{org.json.JSONObject parsed=new org.json.JSONObject(json);LinkedHashMap<String,String> formats=new LinkedHashMap<>();for(String label:new String[]{"小数","循环小数","分数","带分数","度分秒","质因数分解"})if(parsed.has(label))formats.put(label,parsed.getString(label));show(app,index,exact,formats,anchor,false,false);}catch(Exception e){app.error("无法显示结果格式");}
+ private static void load(MainActivity app,String exact,int index,int navigation){
+  if(!app.menuTools.acceptsNavigation(navigation))return;
+  float anchor=app.view.resultMenuTop;int digits=app.prefs.getInt("digits",11);
+  app.task(()->new org.json.JSONObject(ResultForms.values(app.engine,exact,digits)).toString(),json->{
+   if(!app.menuTools.acceptsNavigation(navigation))return;
+   try{org.json.JSONObject parsed=new org.json.JSONObject(json);LinkedHashMap<String,String> formats=new LinkedHashMap<>();for(String label:new String[]{"小数","循环小数","分数","带分数","质因数分解"})if(parsed.has(label))formats.put(label,parsed.getString(label));show(app,index,exact,formats,anchor,false);}catch(Exception e){app.error("无法显示结果格式");}
   });
  }
- private static void show(MainActivity app,int index,String exact,LinkedHashMap<String,String> formats,float anchor,boolean wide,boolean full){
-  ToolPage p=new ToolPage(app,"结果格式",app.menuTools::back);if(!full){p.embedded(Math.max(132,Math.min(anchor,1050)),2358);p.frame();p.overlayWidth=wide?1060:966;p.overlayLeft=18;}else p.setBackground(ToolPage.texture(app));
+ private static void show(MainActivity app,int index,String exact,LinkedHashMap<String,String> formats,float anchor,boolean wide){
+  ToolPage p=new ToolPage(app,"结果格式",app.menuTools::back);p.embedded(Math.max(254,Math.min(anchor,1050)),2358);p.frame();p.overlayWidth=wide?1060:966;p.overlayLeft=18;p.dismissOnOutside=true;
   p.header.setVisibility(View.VISIBLE);p.header.removeAllViews();p.header.setPadding(p.dp(8),0,p.dp(3),0);p.title.setTextSize(android.util.TypedValue.COMPLEX_UNIT_DIP,16);p.header.addView(p.title,new LinearLayout.LayoutParams(0,p.dp(40),1));
-  button(app,p,"expand","展开结果格式",true,()->{app.menuTools.back();show(app,index,exact,formats,anchor,wide,!full);});
-  if(!full)button(app,p,"resize","切换结果窗口宽度",false,()->{app.menuTools.back();show(app,index,exact,formats,anchor,!wide,false);});
+  button(app,p,"expand","展开结果格式",true,()->{Formula input=new Formula();input.restore(index>=0?app.view.tape.get(index).tree:app.formula.save());app.menuTools.home();app.workbench.moreResult(input,exact);});
+  button(app,p,"resize","切换结果窗口宽度",false,()->show(app,index,exact,formats,anchor,!wide));
   button(app,p,"close","关闭结果格式",false,app.menuTools::back);p.header.getLayoutParams().height=p.dp(40);
   for(Map.Entry<String,String> entry:formats.entrySet()){
    String display=entry.getKey().equals("小数")?app.formatted(entry.getValue()):entry.getValue();
@@ -35,8 +38,8 @@ final class ResultFormats {
    preview.setOnLongClickListener(v->{context(app,preview,display,exact);return true;});
    LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.setMargins(p.dp(6),p.dp(4),p.dp(6),p.dp(5));p.body.addView(scroll,lp);p.divider();
   }
-  if(!full){p.scroll.setLayoutParams(new LinearLayout.LayoutParams(-1,-2));p.measure(View.MeasureSpec.makeMeasureSpec(Math.round(app.view.getWidth()*p.overlayWidth/1080f),View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(Math.round(app.view.getHeight()*(2358-p.overlayTop)/2400f),View.MeasureSpec.AT_MOST));p.overlayBottom=Math.min(2358,p.overlayTop+p.getMeasuredHeight()*2400f/app.view.getHeight());}
-  app.menuTools.show(p);
+  p.scroll.setLayoutParams(new LinearLayout.LayoutParams(-1,-2));p.measure(View.MeasureSpec.makeMeasureSpec(Math.round(app.view.getWidth()*p.overlayWidth/1080f),View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(Math.round(app.view.getHeight()*(2358-p.overlayTop)/2400f),View.MeasureSpec.AT_MOST));p.overlayBottom=Math.min(2358,p.overlayTop+p.getMeasuredHeight()*2400f/app.view.getHeight());
+  app.menuTools.popup(p);
  }
  private static void context(MainActivity app,View anchor,String display,String exact){
   ToolPage metrics=new ToolPage(app,"",()->{});LinearLayout menu=new LinearLayout(app);menu.setOrientation(1);menu.setBackground(ToolPage.texture(app));PopupWindow popup=new PopupWindow(menu,Math.round(app.view.getWidth()*.72f),-2,true);popup.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(ToolPage.BG));popup.setOutsideTouchable(true);popup.setElevation(metrics.dp(4));

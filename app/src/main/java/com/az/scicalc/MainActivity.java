@@ -17,11 +17,15 @@ public final class MainActivity extends Activity implements CalculatorView.Liste
     CalculatorView view;
     SharedPreferences prefs;
     final MathEngine engine=new MathEngine();
-    final ExecutorService worker=Executors.newSingleThreadExecutor();
+    final ThreadPoolExecutor worker=CalculationBudget.executor();
     final Handler main=new Handler(Looper.getMainLooper());
     final ArrayList<JSONObject> history=new ArrayList<>();
-    private final ArrayDeque<String> undo=new ArrayDeque<>();
-    final LinkedHashMap<String,String> variables=new LinkedHashMap<>();
+    final ExecutorService historyIO=Executors.newSingleThreadExecutor();
+    private HistoryStore historyStore;private boolean historyLoaded;
+    boolean historyReady;String historyError="";
+    ArrayDeque<String> undo=new ArrayDeque<>();
+    LinkedHashMap<String,String> variables=new LinkedHashMap<>();
+    CalculatorTabs tabs;
     String exact="",ans="0",previous="0";
     boolean degrees=true,decimal=false;
     int angleMode=0;
@@ -29,7 +33,7 @@ public final class MainActivity extends Activity implements CalculatorView.Liste
     Workbench workbench;
     MathOcr ocr;
     MenuTools menuTools;
-    private int generation=0;
+    int generation=0;
     private GraphView graph;
     private FrameLayout surface;
     private ToolPage toolOverlay;
@@ -40,10 +44,17 @@ public final class MainActivity extends Activity implements CalculatorView.Liste
     @Override public void onCreate(Bundle b){
         super.onCreate(b);getWindow().setStatusBarColor(Color.TRANSPARENT);getWindow().setNavigationBarColor(Color.TRANSPARENT);getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE|View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN|View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);getWindow().setNavigationBarContrastEnforced(false);
         prefs=getSharedPreferences("calculator",MODE_PRIVATE);if(prefs.getInt("historyLimit",1000)<1000)prefs.edit().putInt("historyLimit",1000).apply();cleanRemovedToolData();formula=new Formula();formula.restore(prefs.getString("formula","[]"));ans=prefs.getString("ans","0");previous=prefs.getString("previous","0");degrees=prefs.getBoolean("degrees",true);decimal=prefs.getBoolean("decimal",false);exact=prefs.getString("exact","");
-        try{JSONArray a=new JSONArray(prefs.getString("history","[]"));for(int i=0;i<a.length();i++)history.add(a.getJSONObject(i));JSONObject v=new JSONObject(prefs.getString("variables","{}"));Iterator<String> it=v.keys();while(it.hasNext()){String k=it.next();variables.put(k,v.getString(k));}}catch(Exception ignored){}
+        try{JSONObject v=new JSONObject(prefs.getString("variables","{}"));Iterator<String> it=v.keys();while(it.hasNext()){String k=it.next();variables.put(k,v.getString(k));}}catch(Exception ignored){}
         view=new CalculatorView(this,formula,this);view.angle=degrees?"DEG":"RAD";view.approximate=decimal;view.result=prefs.getString("displayResult",exact);view.basic=prefs.getBoolean("basic",false);surface=new FrameLayout(this);surface.addView(view,new FrameLayout.LayoutParams(-1,-1));setContentView(surface);
         FeedbackSounds.prepare(this);
         angleMode=prefs.getInt("angleMode",degrees?0:1);menuTools=new MenuTools(this);workbench=new Workbench(this);keyFeatures=new KeyFeatures(this);ocr=new MathOcr(this);view.restoreTape(prefs.getString("tape","[]"));view.inputActive=!formula.empty()||view.tape.isEmpty()||exact.isEmpty();applyPreferences();
+        tabs=new CalculatorTabs(this,prefs,surface);tabs.restore();applyPreferences();
+        historyStore=new HistoryStore(this);String legacy=prefs.getString("history","[]");
+        historyIO.execute(()->{try{List<JSONObject> loaded=historyStore.load(legacy);historyLoaded=true;main.post(()->{
+            if(isDestroyed())return;boolean pending=!history.isEmpty();history.addAll(loaded);
+            if(pending)while(history.size()>historyLimit())history.remove(history.size()-1);
+            historyReady=true;prefs.edit().remove("history").apply();menuTools.historyLoaded();
+        });}catch(Exception e){main.post(()->{historyError="历史读取失败："+e.getMessage();historyReady=true;if(!isDestroyed()){toast(historyError);menuTools.historyLoaded();}});}});
         worker.execute(()->{try{engine.initialize();}catch(Throwable e){main.post(()->error("数学引擎初始化失败："+e.getClass().getSimpleName()));}});
     }
     private void cleanRemovedToolData(){
@@ -52,19 +63,26 @@ public final class MainActivity extends Activity implements CalculatorView.Liste
         for(String key:prefs.getAll().keySet())if(key.startsWith("rate_")||key.startsWith("unit:")||key.startsWith("unitHistory")||key.startsWith("unitFavorites")||key.startsWith("currency")||key.startsWith("formulaInput:")||key.equals("formulaFavorites")||key.startsWith("chem")||key.equals("atomFormula")||key.equals("massFormula"))edit.remove(key);
         edit.putBoolean("removedToolDataV1",true).apply();
     }
-    @Override protected void onResume(){super.onResume();if(view!=null&&!view.busy&&view.result.isEmpty()){main.removeCallbacks(previewInput);main.postDelayed(previewInput,300);}}
-    @Override protected void onPause(){super.onPause();main.removeCallbacks(previewInput);view.cancelTouches();if(panel!=null)panel.cancelTouch();if(edgeDown!=null){edgeDown.recycle();edgeDown=null;}edgeOpening=false;FeedbackPlayer.release();save();if(graph!=null)graph.saveState();}
-    @Override protected void onDestroy(){super.onDestroy();if(ocr!=null)ocr.close();worker.shutdownNow();}
+    @Override protected void onResume(){super.onResume();schedulePreview();}
+    void schedulePreview(){if(view!=null&&!view.busy&&view.result.isEmpty()){main.removeCallbacks(previewInput);main.postDelayed(previewInput,300);}}
+    @Override protected void onPause(){super.onPause();if(menuTools!=null)menuTools.invalidatePendingNavigation();main.removeCallbacks(previewInput);view.cancelTouches();view.freezeScroll();if(panel!=null)panel.cancelTouch();if(edgeDown!=null){edgeDown.recycle();edgeDown=null;}edgeOpening=false;FeedbackPlayer.release();save();if(tabs!=null)tabs.persistAll();if(graph!=null)graph.saveState();}
+    @Override protected void onDestroy(){super.onDestroy();if(ocr!=null)ocr.close();worker.shutdownNow();historyIO.execute(()->historyStore.close());historyIO.shutdown();}
     @Override protected void onActivityResult(int request,int code,Intent data){super.onActivityResult(request,code,data);if(ocr!=null)ocr.result(request,code,data);}
     int historyLimit(){return Math.max(1000,prefs.getInt("historyLimit",1000));}
+    private void historyWrite(Runnable write){historyIO.execute(()->{try{if(!historyLoaded)throw new IllegalStateException("历史库尚未就绪");write.run();}catch(Exception e){main.post(()->{if(!isDestroyed())toast("历史保存失败："+e.getMessage());});}});}
+    void addHistory(JSONObject record){history.add(0,record);int limit=historyLimit();while(history.size()>limit)history.remove(history.size()-1);historyWrite(()->historyStore.add(record,limit));}
+    void removeHistory(JSONObject record){history.remove(record);historyWrite(()->historyStore.remove(record));}
+    void clearHistory(){history.clear();historyWrite(()->historyStore.clear());}
     void save(){save(true);}
     private void save(boolean includeHistory){
-        SharedPreferences.Editor edit=prefs.edit().putString("tape",view.saveTape()).putInt("angleMode",angleMode).putString("formula",formula.save()).putString("ans",ans).putString("previous",previous).putString("exact",exact).putString("displayResult",view.result).putBoolean("degrees",degrees).putBoolean("decimal",decimal).putBoolean("basic",view.basic).putString("variables",new JSONObject(variables).toString());
-        if(includeHistory){JSONArray h=new JSONArray();for(JSONObject j:history)h.put(j);edit.putString("history",h.toString());}
+        SharedPreferences.Editor edit=prefs.edit();
+        if(tabs==null||tabs.foreground())edit.putString("tape",view.saveTape()).putInt("angleMode",angleMode).putString("formula",formula.save()).putString("ans",ans).putString("previous",previous).putString("exact",exact).putString("displayResult",view.result).putBoolean("degrees",degrees).putBoolean("decimal",decimal).putBoolean("basic",view.basic).putString("variables",new JSONObject(variables).toString());
+
         edit.apply();
+        if(tabs!=null)tabs.persist(includeHistory);
     }
     private final Runnable previewInput=()->{
-        int id=generation;
+        int id=generation;CalculatorTabs.Page owner=tabs==null?null:tabs.owner();
         if(isDestroyed()||!prefs.getBoolean("autoPreview",true)||view.gridActive||view.workflowStep>=0||!view.prompt.isEmpty()||view.baseMode||!formula.complete()||formula.empty())return;
         String source;
         try{
@@ -74,24 +92,32 @@ public final class MainActivity extends Activity implements CalculatorView.Liste
         }catch(Exception ignored){return;}
         final String expression=source;
         boolean approx=decimal||!prefs.getBoolean("casEnabled",true);
-        worker.execute(()->{try{String result=engine.evaluate(expression,approx,prefs.getInt("digits",11));main.post(()->{if(id==generation&&!isDestroyed()){view.result=approx?formatted(result):ResultFormat.exactDisplay(result,prefs.getString("numberFormat","normal"),prefs.getInt("digits",11),prefs.getBoolean("scientificE",false));view.invalidate();}});}catch(Throwable ignored){}});
+        int previewDigits=prefs.getInt("digits",11);
+        owner.preview=worker.submit(()->{try{String result=engine.evaluate(expression,approx,previewDigits);main.post(()->{if(owner!=null&&tabs.valid(owner,id))tabs.inPage(owner,()->{view.result=approx?formatted(result):ResultFormat.exactDisplay(result,prefs.getString("numberFormat","normal"),prefs.getInt("digits",11),prefs.getBoolean("scientificE",false));view.invalidate();});});}catch(Throwable ignored){}});
     };
     void changed(){
+        cancelPending(false);
         view.editing();++generation;view.busy=false;view.message="";view.result="";exact="";view.invalidate();
-        // Editing cannot alter committed history or variables. Avoid encoding
-        // the entire history for every finger release.
+        // Avoid encoding committed history for every finger release.
         save(false);
-        main.removeCallbacks(previewInput);
-        if(view.baseMode)workbench.modes.previewBase();
-        else main.postDelayed(previewInput,300);
+        if(tabs!=null)tabs.refresh();
+        if(tabs==null||tabs.foreground()){main.removeCallbacks(previewInput);if(view.baseMode)workbench.modes.previewBase();else main.postDelayed(previewInput,300);}
     }
     void checkpoint(){undo.addLast(formula.save());while(undo.size()>60)undo.removeFirst();}
     private void closeFullPage(){if(fullPage==null)return;ToolPage exiting=fullPage;fullPage=null;exiting.closing=true;exiting.animate().cancel();exiting.animate().translationX(surface.getWidth()).setDuration(300).setInterpolator(new android.view.animation.DecelerateInterpolator()).withEndAction(()->{if(fullPage!=exiting&&exiting.closing)surface.removeView(exiting);}).start();view.animate().translationX(0).setDuration(300).start();}
-    void calculator(){closeFullPage();if(toolOverlay!=null){ToolPage exiting=toolOverlay;toolOverlay=null;exiting.closing=true;exiting.animate().cancel();exiting.animate().alpha(0).setDuration(150).withEndAction(()->{if(exiting.closing&&toolOverlay!=exiting)surface.removeView(exiting);}).start();}if(surface.getParent()==null)setContentView(surface);applyPreferences();}
+    void calculator(){if(tabs!=null&&!tabs.foreground()){applyPreferences();return;}closeFullPage();if(toolOverlay!=null){ToolPage exiting=toolOverlay;toolOverlay=null;exiting.closing=true;exiting.animate().cancel();exiting.animate().alpha(0).setDuration(150).withEndAction(()->{if(exiting.closing&&toolOverlay!=exiting)surface.removeView(exiting);}).start();}if(surface.getParent()==null)setContentView(surface);applyPreferences();}
+    void prepareTabSwitch(){
+        main.removeCallbacks(previewInput);view.cancelTouches();view.freezeScroll();menuTools.resetForTabs();
+        if(panel!=null){panel.cancelTouch();surface.removeView(panel);panel=null;}
+        for(ToolPage p:new ToolPage[]{toolOverlay,fullPage})if(p!=null){p.animate().cancel();p.closing=true;surface.removeView(p);}
+        toolOverlay=null;fullPage=null;view.animate().cancel();view.setTranslationX(0);view.drawerProgress=0;
+        if(edgeDown!=null){edgeDown.recycle();edgeDown=null;}edgeOpening=false;
+    }
     void showTool(ToolPage page){showTool(page,false,true);}
     void showTool(ToolPage page,boolean backwards){showTool(page,backwards,true);}
     void replaceTool(ToolPage page){showTool(page,false,false);}
     private void showTool(ToolPage page,boolean backwards,boolean animate){
+        if(tabs!=null&&!tabs.foreground())return;
         view.cancelTouches();
         if(toolOverlay!=null){toolOverlay.animate().cancel();surface.removeView(toolOverlay);toolOverlay=null;}
         if(!page.embedded){
@@ -106,16 +132,24 @@ public final class MainActivity extends Activity implements CalculatorView.Liste
         closeFullPage();
         if(page.getParent()!=null)((ViewGroup)page.getParent()).removeView(page);
         FrameLayout.LayoutParams lp=new FrameLayout.LayoutParams(page.overlayWidth==0?-1:Math.round(view.getWidth()*page.overlayWidth/1080f),Math.round(view.getHeight()*(page.overlayBottom-page.overlayTop)/2400f));
-        lp.topMargin=Math.round(view.getHeight()*page.overlayTop/2400f);lp.gravity=Gravity.TOP|(page.overlayLeft<0?Gravity.CENTER_HORIZONTAL:Gravity.LEFT);if(page.overlayLeft>=0)lp.leftMargin=Math.round(view.getWidth()*page.overlayLeft/1080f);
+        if(view.getWidth()>view.getHeight()){
+            page.scroll.setLayoutParams(new android.widget.LinearLayout.LayoutParams(-1,0,1));
+            int inset=Math.round(12*getResources().getDisplayMetrics().density);int status=surface.getRootWindowInsets()==null?inset:surface.getRootWindowInsets().getInsets(WindowInsets.Type.statusBars()).top;
+            lp.width=Math.min(lp.width<0?view.getWidth()-inset*2:lp.width,Math.round(420*getResources().getDisplayMetrics().density));lp.height=Math.min(Math.max(lp.height,Math.round(180*getResources().getDisplayMetrics().density)),view.getHeight()-status-inset*2);
+            lp.topMargin=Math.min(Math.round(view.getHeight()*page.overlayTop/2400f),view.getHeight()-lp.height-inset);lp.topMargin=Math.max(status+inset,lp.topMargin);lp.leftMargin=Math.min(Math.round(view.getWidth()*Math.max(0,page.overlayLeft)/1080f),view.getWidth()-lp.width-inset);lp.gravity=Gravity.TOP|Gravity.LEFT;
+        }else {lp.topMargin=Math.round(view.getHeight()*page.overlayTop/2400f);lp.gravity=Gravity.TOP|(page.overlayLeft<0?Gravity.CENTER_HORIZONTAL:Gravity.LEFT);if(page.overlayLeft>=0)lp.leftMargin=Math.round(view.getWidth()*page.overlayLeft/1080f);}
         page.closing=false;page.animate().cancel();page.setAlpha(0);toolOverlay=page;surface.addView(page,lp);if(surface.getParent()==null)setContentView(surface);page.animate().alpha(1).setDuration(150).start();view.invalidate();
     }
     void applyPreferences(){view.setTheme(prefs.getInt("skin",0));view.setFeedback(prefs.getBoolean("sound",false),prefs.getBoolean("vibration",true));view.angle=new String[]{"DEG","RAD","GRA"}[angleMode];view.displayScale=prefs.getFloat("displayScale",1);view.displayMono=prefs.getBoolean("displayMono",true);view.blinkCursor=prefs.getBoolean("blinkCursor",true);view.ansStyle=prefs.getInt("ansStyle",2);view.fractionMultiply=prefs.getBoolean("fractionMultiply",true);view.descendingPowers=prefs.getBoolean("descendingPowers",false);view.showCalcInfo=prefs.getBoolean("showCalcInfo",true);view.relativePercent=prefs.getBoolean("relativePercent",true);view.implicitPriority=prefs.getBoolean("implicitPriority",true);view.divisionSlash=prefs.getBoolean("divisionSlash",false);view.multiplicationStar=prefs.getBoolean("multiplicationStar",false);view.keyLabelStyle=prefs.getInt("keyLabelStyle",0);view.keyFontScale=new float[]{.85f,1,1.15f}[prefs.getInt("keyFontSize",1)];view.groupThousands=prefs.getBoolean("groupThousands",true);view.groupDecimals=prefs.getBoolean("groupDecimals",true);view.decimalComma=prefs.getBoolean("decimalComma",false);view.formatLabel=prefs.getString("numberFormat","normal").equals("normal")?"NORM":prefs.getString("numberFormat","normal").toUpperCase(Locale.ROOT);view.digits=prefs.getInt("digits",11);view.approximate=decimal;view.invalidate();if(prefs.getBoolean("keepScreenOn",false))getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);int ui=View.SYSTEM_UI_FLAG_LAYOUT_STABLE|View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN|View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION;if(!prefs.getBoolean("showStatusBar",true))ui|=View.SYSTEM_UI_FLAG_FULLSCREEN;getWindow().getDecorView().setSystemUiVisibility(ui);updateSystemBars();setRequestedOrientation(new int[]{android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED,android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE}[prefs.getInt("orientation",0)]);}
-    private void updateSystemBars(){View decor=getWindow().getDecorView();int flags=decor.getSystemUiVisibility(),light=View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR|View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;if(fullPage==null&&graph==null&&prefs.getInt("skin",0)==8)flags|=light;else flags&=~light;decor.setSystemUiVisibility(flags);}
+    private void updateSystemBars(){if(tabs!=null&&!tabs.foreground())return;View decor=getWindow().getDecorView();int flags=decor.getSystemUiVisibility(),light=View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR|View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;if(fullPage==null&&graph==null&&prefs.getInt("skin",0)==8)flags|=light;else flags&=~light;decor.setSystemUiVisibility(flags);if(tabs!=null)tabs.refresh();}
     String formatted(String value){return ResultFormat.scientific(ResultFormat.format(value,prefs.getString("numberFormat","normal"),prefs.getInt("digits",11)),prefs.getBoolean("scientificE",false));}
     void error(String s){view.resultFeedback(false);view.message=s;view.busy=false;view.invalidate();}
     String vars(String s){s=workbench.expandFunctions(s);LinkedHashMap<String,String> values=new LinkedHashMap<>();values.put("Ans",ans);for(Map.Entry<String,String> v:variables.entrySet())values.put(v.getKey().equals("e")?"scvE":v.getKey(),v.getValue());return MathFunctions.percent(MathFunctions.comparison(ScopedValues.apply(s,values)),prefs.getBoolean("relativePercent",true));}
+    Function<String,String> varsForJob(){JSONObject functions=workbench.functionsJson();int jobAngle=angleMode;LinkedHashMap<String,String> values=new LinkedHashMap<>();values.put("Ans",ans);for(Map.Entry<String,String> v:variables.entrySet())values.put(v.getKey().equals("e")?"scvE":v.getKey(),v.getValue());boolean relative=prefs.getBoolean("relativePercent",true);return expression->MathFunctions.percent(MathFunctions.comparison(ScopedValues.apply(Workbench.expandFunctions(expression,functions,jobAngle),values)),relative);}
 
     @Override public void press(String action){
+        if(action.equals("cancelCalculation")||action.equals("clear")&&view.busy){cancelPending(true);return;}
+        if(menuTools!=null)menuTools.invalidatePendingNavigation();
         if(!action.equals("shift")&&!action.equals("alpha")){view.shift=false;view.alpha=false;}
         if(workbench!=null&&workbench.handle(action))return;
         if(keyFeatures!=null&&keyFeatures.handle(action))return;
@@ -160,7 +194,7 @@ public final class MainActivity extends Activity implements CalculatorView.Liste
             case "about":about();break;
             case "second":functions();break;
             case "hyp":choose("双曲函数",new String[]{"Sinh","Cosh","Tanh","ArcSinh","ArcCosh","ArcTanh"},i->{checkpoint();formula.template("func",new String[]{"Sinh","Cosh","Tanh","ArcSinh","ArcCosh","ArcTanh"}[i]);changed();});break;
-            case "engineering":if(!exact.isEmpty())task(()->{double d=engine.value(exact);if(d==0)return "0";int e=(int)(Math.floor(Math.log10(Math.abs(d))/3)*3);return String.format(Locale.US,"%.10g × 10^%d",d/Math.pow(10,e),e);},v->{view.result=v;view.invalidate();});break;
+            case "engineering":if(!exact.isEmpty()){String source=exact;task(()->{double d=engine.value(source);if(d==0)return "0";int e=(int)(Math.floor(Math.log10(Math.abs(d))/3)*3);return String.format(Locale.US,"%.10g × 10^%d",d/Math.pow(10,e),e);},v->{view.result=v;view.invalidate();});}break;
             case "reset":checkpoint();keyFeatures.cancelEntry();formula.clear();view.clearScreen();changed();break;
             case "solve":equations();break;
             case "matrix":matrices();break;
@@ -191,18 +225,32 @@ public final class MainActivity extends Activity implements CalculatorView.Liste
     void runResult(String source,boolean approximate,boolean addHistory){runResult(source,approximate,addHistory,false);}
     void runFactored(String source){runResult(source,false,true,true);}
     private void runResult(String source,boolean approximate,boolean addHistory,boolean factorOutput){
-        String saved=formula.save(),format=prefs.getString("numberFormat","normal");int digits=prefs.getInt("digits",11);boolean angle=degrees;
-        task(()->{String value=engine.evaluate(source,false);if(factorOutput){if(!engine.evaluate("IntegerQ("+value+")",false).equals("True"))throw new IllegalArgumentException("质因数分解需要整数");value=MathFunctions.factorDisplay(engine.evaluate("FactorInteger("+value+")",false));}String display=approximate?ResultFormat.scientific(ResultFormat.format(engine.evaluate(value,true,digits),format,digits),prefs.getBoolean("scientificE",false)):ResultFormat.exactDisplay(value,format,digits,prefs.getBoolean("scientificE",false));String kind="";if(value.startsWith("{")&&!value.contains("->")){if(engine.evaluate("MatrixQ("+value+",NumericQ)",false).equals("True"))kind="MatAns";else if(engine.evaluate("VectorQ("+value+",NumericQ)",false).equals("True"))kind="VctAns";}return new JSONObject().put("result",value).put("displayResult",display).put("arrayKind",kind).toString();},packed->{
+        String saved=formula.save(),format=prefs.getString("numberFormat","normal");int digits=prefs.getInt("digits",11);boolean angle=degrees,scientific=prefs.getBoolean("scientificE",false);
+        task(()->{String value=engine.evaluate(source,false);if(factorOutput){if(!engine.evaluate("IntegerQ("+value+")",false).equals("True"))throw new IllegalArgumentException("质因数分解需要整数");value=MathFunctions.factorDisplay(engine.evaluate("FactorInteger("+value+")",false));}String display=approximate?ResultFormat.scientific(ResultFormat.format(engine.evaluate(value,true,digits),format,digits),scientific):ResultFormat.exactDisplay(value,format,digits,scientific);String kind="";if(value.startsWith("{")&&!value.contains("->")){if(engine.evaluate("MatrixQ("+value+",NumericQ)",false).equals("True"))kind="MatAns";else if(engine.evaluate("VectorQ("+value+",NumericQ)",false).equals("True"))kind="VctAns";}return new JSONObject().put("result",value).put("displayResult",display).put("arrayKind",kind).toString();},packed->{
             try{JSONObject values=new JSONObject(packed);exact=values.getString("result");previous=ans;ans=exact;view.result=values.getString("displayResult");
                 if(!values.optString("arrayKind").isEmpty())variables.put(values.getString("arrayKind"),exact);
-                if(addHistory){JSONObject j=new JSONObject();j.put("source",formula.source(angleMode)).put("engineSource",source).put("tree",saved).put("result",exact).put("displayResult",view.result).put("degrees",angle).put("angleMode",angleMode).put("decimal",approximate).put("mode","基本算术").put("time",System.currentTimeMillis());history.add(0,j);while(history.size()>historyLimit())history.remove(history.size()-1);view.addTape(saved,exact,view.result);formula.clear();}
+                if(addHistory){JSONObject j=new JSONObject();j.put("source",formula.source(angleMode)).put("engineSource",source).put("tree",saved).put("result",exact).put("displayResult",view.result).put("degrees",angle).put("angleMode",angleMode).put("decimal",approximate).put("mode","基本算术").put("time",System.currentTimeMillis());tagHistory(j);addHistory(j);view.addTape(saved,exact,view.result);formula.clear();}
                 view.invalidate();save();
             }catch(JSONException e){error("保存计算结果失败");}
         });
     }
-    void refreshResult(){if(exact.isEmpty()){save();return;}String value=exact;boolean approximate=decimal||!prefs.getBoolean("casEnabled",true);int digits=prefs.getInt("digits",11);String format=prefs.getString("numberFormat","normal");task(()->approximate?ResultFormat.scientific(ResultFormat.format(engine.evaluate(value,true,digits),format,digits),prefs.getBoolean("scientificE",false)):ResultFormat.exactDisplay(value,format,digits,prefs.getBoolean("scientificE",false)),v->{view.result=v;view.updateLastDisplay(v);applyPreferences();view.invalidate();save();});}
+    void refreshResult(){if(exact.isEmpty()){save();return;}String value=exact;boolean approximate=decimal||!prefs.getBoolean("casEnabled",true);int digits=prefs.getInt("digits",11);String format=prefs.getString("numberFormat","normal");boolean scientific=prefs.getBoolean("scientificE",false);task(()->approximate?ResultFormat.scientific(ResultFormat.format(engine.evaluate(value,true,digits),format,digits),scientific):ResultFormat.exactDisplay(value,format,digits,scientific),v->{view.result=v;view.updateLastDisplay(v);applyPreferences();view.invalidate();save();});}
     interface Work {String run() throws Exception;}
-    void task(Work work,java.util.function.Consumer<String> result){main.removeCallbacks(previewInput);int id=++generation;view.busy=true;view.message="";view.invalidate();worker.execute(()->{try{String value=work.run();main.post(()->{if(id!=generation||isDestroyed())return;view.busy=false;result.accept(value);view.invalidate();});}catch(Throwable e){main.post(()->{if(id!=generation||isDestroyed())return;error("计算失败："+(e.getMessage()==null?e.getClass().getSimpleName():e.getMessage()));});}});}
+    void cancelFuture(Future<?> future){if(future!=null){future.cancel(true);if(future instanceof Runnable)worker.remove((Runnable)future);}}
+    private void cancelPending(boolean notify){
+        if(tabs==null)return;CalculatorTabs.Page owner=tabs.owner();cancelFuture(owner.calculation);cancelFuture(owner.preview);owner.calculation=null;owner.preview=null;
+        if(notify){++generation;owner.generation=generation;view.busy=false;view.message="已取消计算";view.invalidate();save(false);tabs.refresh();}
+    }
+    void task(Work work,java.util.function.Consumer<String> result){
+        if(tabs.foreground())main.removeCallbacks(previewInput);cancelPending(false);int id=++generation;CalculatorTabs.Page owner=tabs.owner();owner.generation=id;view.busy=true;view.busyLabel="等待中…";view.message="";view.invalidate();save(false);tabs.refresh();
+        owner.calculation=worker.submit(()->{
+            main.post(()->{if(tabs.valid(owner,id)){owner.view.busyLabel="计算中…";owner.view.invalidate();}});
+            try{String value=work.run();CalculationBudget.remainingNanos();main.post(()->{if(!tabs.valid(owner,id))return;owner.calculation=null;tabs.inPage(owner,()->{view.busy=false;result.accept(value);view.invalidate();save(false);});});}
+            catch(Throwable e){main.post(()->{if(!tabs.valid(owner,id))return;owner.calculation=null;tabs.inPage(owner,()->{error("计算失败："+(e.getMessage()==null?e.getClass().getSimpleName():e.getMessage()));save(false);});});}
+        });
+    }
+
+    void tagHistory(JSONObject record){if(tabs!=null)try{record.put("tabId",tabs.owner().id).put("tabName",tabs.owner().name);}catch(Exception ignored){}}
     void toast(String s){Toast.makeText(this,s,Toast.LENGTH_SHORT).show();}
     void computeCurrent(java.util.function.Consumer<String> done){if(formula.empty()){done.accept(ans);return;}if(!formula.complete()){error("请填完整公式模板");return;}String source=vars(formula.source(angleMode));task(()->engine.evaluate(source,false),done);}
     void setAngle(int mode){angleMode=mode;degrees=mode==0;prefs.edit().putInt("angleMode",mode).apply();applyPreferences();if(!formula.empty())changed();else save();}
@@ -222,12 +270,12 @@ public final class MainActivity extends Activity implements CalculatorView.Liste
     private void history(){String[] a=new String[history.size()];for(int i=0;i<a.length;i++){JSONObject j=history.get(i);a[i]=j.optString("source")+"\n= "+j.optString("result");}if(a.length==0){toast("还没有计算记录");return;}choose("历史 · 点击重新编辑",a,i->{JSONObject j=history.get(i);checkpoint();formula.restore(j.optString("tree"));changed();exact=j.optString("result");view.result=exact;view.invalidate();});}
     private void store(){if(exact.isEmpty()){toast("先计算一个结果，再存入变量");return;}choose("将结果存入变量",new String[]{"a","b","c","x","y","z","m"},i->{String k=new String[]{"a","b","c","x","y","z","m"}[i];variables.put(k,exact);save();toast(k+" = "+exact);});}
     private void recall(){if(variables.isEmpty()){toast("尚未存储变量：SHIFT → RCL 存入");return;}ArrayList<String> names=new ArrayList<>(variables.keySet());String[] labels=new String[names.size()];for(int i=0;i<labels.length;i++)labels[i]=names.get(i)+" = "+variables.get(names.get(i));choose("变量",labels,i->{checkpoint();formula.text(names.get(i));changed();});}
-    private void memory(boolean add){computeCurrent(r->task(()->engine.evaluate("("+variables.getOrDefault("m","0")+")"+(add?"+":"-")+"("+r+")",false),v->{variables.put("m",v);save();toast("m = "+v);}));}
+    private void memory(boolean add){computeCurrent(r->{String memory=variables.getOrDefault("m","0");task(()->engine.evaluate("("+memory+")"+(add?"+":"-")+"("+r+")",false),v->{variables.put("m",v);save();toast("m = "+v);});});}
     private void menu(){showPanel(true);}
     private void mode(){showPanel(false);}
     private void closePanel(){closePanel(null);}
     private void closePanel(Runnable next){CalculatorPanel closing=panel;if(closing==null){if(next!=null)next.run();return;}closing.dismiss(()->{surface.removeView(closing);if(panel==closing)panel=null;if(next!=null&&!isDestroyed())next.run();});}
-    private void showPanel(boolean drawer){if(panel!=null)return;view.cancelTouches();panel=new CalculatorPanel(this,drawer,new CalculatorPanel.Listener(){public void position(float progress){view.drawerProgress=progress;view.postInvalidateOnAnimation();}public void close(){closePanel();}public void selected(String action){if(action.equals("toggleSound")){boolean sound=!prefs.getBoolean("sound",false);prefs.edit().putBoolean("sound",sound).apply();panel.sound=sound;panel.invalidate();applyPreferences();if(!sound)FeedbackPlayer.release();}else closePanel(()->panelAction(action));}});panel.basic=view.basic;panel.sound=prefs.getBoolean("sound",false);surface.addView(panel,new FrameLayout.LayoutParams(-1,-1));}
+    private void showPanel(boolean drawer){if(panel!=null)return;menuTools.invalidatePendingNavigation();view.cancelTouches();panel=new CalculatorPanel(this,drawer,new CalculatorPanel.Listener(){public void position(float progress){view.drawerProgress=progress;view.postInvalidateOnAnimation();}public void close(){closePanel();}public void selected(String action){if(action.equals("toggleSound")){boolean sound=!prefs.getBoolean("sound",false);prefs.edit().putBoolean("sound",sound).apply();panel.sound=sound;panel.invalidate();applyPreferences();if(!sound)FeedbackPlayer.release();}else closePanel(()->panelAction(action));}});panel.basic=view.basic;panel.sound=prefs.getBoolean("sound",false);surface.addView(panel,new FrameLayout.LayoutParams(-1,-1));}
     private void panelAction(String action){
         if(workbench.handle(action))return;
         if(keyFeatures.handle(action))return;
@@ -240,7 +288,7 @@ public final class MainActivity extends Activity implements CalculatorView.Liste
     }
     private void polynomial(int degree,String inequality){String[] labels=new String[degree+1],defaults=new String[degree+1];for(int i=0;i<=degree;i++){labels[i]="系数 "+(char)('a'+i)+" · x^"+(degree-i);defaults[i]=i==0?"1":i==degree?"-1":"0";}tool("解"+degree+"次"+(inequality==null?"多项式":"不等式"),labels,defaults,a->{StringBuilder s=new StringBuilder();for(int i=0;i<a.length;i++){if(i>0)s.append('+');s.append('(').append(a[i]).append(")*x^").append(degree-i);}return (inequality==null?"Solve(":"Reduce(")+s+(inequality==null?"==":inequality)+"0,x"+(inequality==null?"":",Reals")+")";});}
     private void capture(){try{android.graphics.Bitmap image=android.graphics.Bitmap.createBitmap(view.getWidth(),view.getHeight(),android.graphics.Bitmap.Config.ARGB_8888);view.draw(new android.graphics.Canvas(image));ContentValues values=new ContentValues();values.put(android.provider.MediaStore.Images.Media.DISPLAY_NAME,"SciCalc-"+System.currentTimeMillis()+".png");values.put(android.provider.MediaStore.Images.Media.MIME_TYPE,"image/png");values.put(android.provider.MediaStore.Images.Media.RELATIVE_PATH,"Pictures/SciCalc");android.net.Uri uri=getContentResolver().insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,values);if(uri==null)throw new java.io.IOException("无法创建图片");try(java.io.OutputStream out=getContentResolver().openOutputStream(uri)){image.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out);}image.recycle();toast("计算截图已保存到相册");}catch(Exception e){toast("保存失败："+e.getMessage());}}
-    private void settings(){choose("设置",new String[]{"角度："+(degrees?"DEG 度":"RAD 弧度"),"结果："+(decimal?"小数":"精确"),"输入任意表达式","清除历史","开源组件"},i->{if(i==0)press("angle");if(i==1)press("decimal");if(i==2)linearInput();if(i==3){history.clear();save();toast("历史已清除");}if(i==4)about();});}
+    private void settings(){choose("设置",new String[]{"角度："+(degrees?"DEG 度":"RAD 弧度"),"结果："+(decimal?"小数":"精确"),"输入任意表达式","清除历史","开源组件"},i->{if(i==0)press("angle");if(i==1)press("decimal");if(i==2)linearInput();if(i==3){clearHistory();save();toast("历史已清除");}if(i==4)about();});}
     private void about(){menuTools.handle("features");}
     private LinearLayout form(){LinearLayout l=new LinearLayout(this);l.setOrientation(LinearLayout.VERTICAL);int p=(int)(20*getResources().getDisplayMetrics().density);l.setPadding(p,8,p,8);return l;}
     private EditText field(LinearLayout l,String label,String value){TextView t=new TextView(this);t.setText(label);t.setTextSize(13);t.setTextColor(0xffb4a4d2);l.addView(t);EditText e=new EditText(this);e.setText(value);e.setTextSize(17);e.setSingleLine(false);e.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);e.setSelectAllOnFocus(true);l.addView(e,new LinearLayout.LayoutParams(-1,-2));return e;}
@@ -248,9 +296,9 @@ public final class MainActivity extends Activity implements CalculatorView.Liste
     private void outcome(String title,String expression,String result,String[] labels,String[] values,Function<String[],String> factory){
         checkpoint();formula.load(result);exact=result;previous=ans;ans=result;view.result=result;view.invalidate();
         try{String[] markers=new String[values.length];for(int i=0;i<markers.length;i++)markers[i]=ToolInput.marker(i);String template="";try{template=factory.apply(markers);}catch(Exception ignored){}
-            JSONObject j=new JSONObject();j.put("source",expression).put("tree",formula.save()).put("result",result).put("displayResult",result).put("time",System.currentTimeMillis()).put("mode",title).put("degrees",degrees).put("decimal",false).put("toolTitle",title).put("toolLabels",new JSONArray(Arrays.asList(labels))).put("toolValues",new JSONArray(Arrays.asList(values))).put("toolTemplate",template);history.add(0,j);while(history.size()>historyLimit())history.remove(history.size()-1);
+            JSONObject j=new JSONObject();j.put("source",expression).put("tree",formula.save()).put("result",result).put("displayResult",result).put("time",System.currentTimeMillis()).put("mode",title).put("degrees",degrees).put("decimal",false).put("toolTitle",title).put("toolLabels",new JSONArray(Arrays.asList(labels))).put("toolValues",new JSONArray(Arrays.asList(values))).put("toolTemplate",template);tagHistory(j);addHistory(j);
         }catch(Exception ignored){}save();
-        ReferenceDialogs.builder(this).setTitle(title).setMessage(ToolInput.readable(title,labels,values)+"\n\n结果：\n"+result).setPositiveButton("完成",null).setNeutralButton("复制",(d,w)->copyResult()).setNegativeButton("使用结果",(d,w)->{checkpoint();formula.load(result);changed();}).show();
+        if(tabs.foreground())ReferenceDialogs.builder(this).setTitle(title).setMessage(ToolInput.readable(title,labels,values)+"\n\n结果：\n"+result).setPositiveButton("完成",null).setNeutralButton("复制",(d,w)->copyResult()).setNegativeButton("使用结果",(d,w)->{checkpoint();formula.load(result);changed();}).show();
     }
     void reopenTool(JSONObject record){
         if(workbench.modes.reopen(record))return;
@@ -260,7 +308,7 @@ public final class MainActivity extends Activity implements CalculatorView.Liste
         else if(!template.isEmpty())tool(title,labels,values,a->ToolInput.apply(template,a));
     }
     private void linearInput(){LinearLayout l=form();EditText e=field(l,"表达式，例如 Sin(Pi/6) 或 Solve(x^2=2,x)",formula.source(degrees));ReferenceDialogs.builder(this).setTitle("表达式输入").setView(l).setNegativeButton("取消",null).setPositiveButton("使用",(d,w)->{checkpoint();formula.load(e.getText().toString());changed();}).show();}
-    private void applyCurrent(String fn){if(formula.empty()){tool(fn,new String[]{"表达式"},new String[]{"x^2-1"},a->fn+"("+a[0]+")");return;}task(()->engine.evaluate(fn+"("+formula.source(degrees)+")",false),r->{exact=r;view.result=r;view.invalidate();});}
+    private void applyCurrent(String fn){if(formula.empty()){tool(fn,new String[]{"表达式"},new String[]{"x^2-1"},a->fn+"("+a[0]+")");return;}String source=fn+"("+formula.source(degrees)+")";task(()->engine.evaluate(source,false),r->{exact=r;view.result=r;view.invalidate();});}
     private void functions(){choose("函数",new String[]{"Abs","Floor","Ceiling","Round","GCD","LCM","Mod","Min","Max","Factorial","Log10","Exp","Sign"},i->{checkpoint();formula.template("func",new String[]{"Abs","Floor","Ceiling","Round","GCD","LCM","Mod","Min","Max","Factorial","Log10","Exp","Sign"}[i]);changed();});}
     private void calculus(){choose("微积分与代数",new String[]{"符号求导","不定积分","定积分","极限","化简","展开","因式分解","求和","连乘"},i->{String[] f={"D","Integrate","Integrate","Limit","FullSimplify","Expand","Factor","Sum","Product"};if(i==0||i==1)tool(i==0?"求导":"不定积分",new String[]{"表达式","变量"},new String[]{"x^2","x"},a->f[i]+"("+a[0]+","+a[1]+")");else if(i==2||i==7||i==8)tool(i==2?"定积分":i==7?"求和":"连乘",new String[]{"表达式","变量","下界","上界"},new String[]{"x^2","x","0",i==2?"1":"10"},a->f[i]+"("+a[0]+",{"+a[1]+","+a[2]+","+a[3]+"})");else if(i==3)press("limit");else tool(f[i],new String[]{"表达式"},new String[]{i==5?"(x+1)^3":"x^2-1"},a->f[i]+"("+a[0]+")");});}
     private void equations(){choose("方程与不等式",new String[]{"多项式 / 方程求解","方程组","不等式","数值求根"},i->{if(i==0)tool("方程求解",new String[]{"方程（等号使用 ==）","未知数"},new String[]{"x^2-5*x+6==0","x"},a->"Solve("+a[0]+","+a[1]+")");if(i==1)tool("方程组",new String[]{"方程列表","未知数列表"},new String[]{"{x+y==3,x-y==1}","{x,y}"},a->"Solve("+a[0]+","+a[1]+")");if(i==2)tool("不等式",new String[]{"不等式","未知数"},new String[]{"x^2-4<0","x"},a->"Reduce("+a[0]+","+a[1]+",Reals)");if(i==3)tool("数值求根",new String[]{"方程","未知数","初始值"},new String[]{"Cos(x)==x","x","0.5"},a->"FindRoot("+a[0]+",{"+a[1]+","+a[2]+"})");});}
@@ -274,7 +322,7 @@ public final class MainActivity extends Activity implements CalculatorView.Liste
     private void table(){tool("函数数值表",new String[]{"f(x)","起点","终点","步长"},new String[]{"x^2","0","5","1"},a->{double lo=Double.parseDouble(a[1]),hi=Double.parseDouble(a[2]),step=Double.parseDouble(a[3]);if(step==0||!Double.isFinite(step)||(hi-lo)/step<0||(hi-lo)/step>199)throw new IllegalArgumentException("步长须指向终点，最多 200 行");return "Table({x,"+a[0]+"},{x,"+a[1]+","+a[2]+","+a[3]+"})";});}
     private void constants(){String[] labels={"π · 圆周率","e · 自然常数","c · 光速 (m/s)","h · 普朗克常数 (J·s)","kB · 玻尔兹曼常数 (J/K)","NA · 阿伏伽德罗常数 (1/mol)","g₀ · 标准重力 (m/s²)"};String[] values={"π","E","299792458","6.62607015*10^(-34)","1.380649*10^(-23)","6.02214076*10^(23)","9.80665"};choose("常数 · 点击插入",labels,i->{checkpoint();formula.text(values[i]);changed();});}
     private void programming(){tool("数学脚本",new String[]{"Symja 表达式 / 脚本（分号分隔，末句返回结果）"},new String[]{"Table(n^2,{n,1,10})"},a->a[0]);}
-    private void openGraph(){graph=new GraphView(this,()->{graph=null;setContentView(surface);updateSystemBars();});setContentView(graph);updateSystemBars();}
+    private void openGraph(){menuTools.invalidatePendingNavigation();graph=new GraphView(this,()->{graph=null;setContentView(surface);updateSystemBars();});setContentView(graph);updateSystemBars();}
     @Override public boolean dispatchTouchEvent(MotionEvent e){
         int action=e.getActionMasked();
         if(action==MotionEvent.ACTION_DOWN)dismissingPopupTouch=false;
@@ -287,7 +335,7 @@ public final class MainActivity extends Activity implements CalculatorView.Liste
                 dismissingPopupTouch=true;view.cancelTouches();menuTools.home();return true;
             }
         }
-        if(action==MotionEvent.ACTION_DOWN&&panel==null&&toolOverlay==null&&graph==null&&surface!=null&&surface.getParent()!=null&&e.getX()<20*getResources().getDisplayMetrics().density&&e.getY()>78*view.getHeight()/2400f){if(edgeDown!=null)edgeDown.recycle();edgeDown=MotionEvent.obtain(e);edgeOpening=false;}
+        if(action==MotionEvent.ACTION_DOWN&&panel==null&&toolOverlay==null&&graph==null&&surface!=null&&surface.getParent()!=null&&e.getX()<20*getResources().getDisplayMetrics().density&&e.getY()>246*view.getHeight()/2400f){if(edgeDown!=null)edgeDown.recycle();edgeDown=MotionEvent.obtain(e);edgeOpening=false;}
         if(edgeDown!=null){
             if(!edgeOpening&&action==MotionEvent.ACTION_MOVE){float dx=e.getX()-edgeDown.getX(),dy=e.getY()-edgeDown.getY();if(dx>ViewConfiguration.get(this).getScaledTouchSlop()&&dx>Math.abs(dy)){
                 MotionEvent cancel=MotionEvent.obtain(e);cancel.setAction(MotionEvent.ACTION_CANCEL);super.dispatchTouchEvent(cancel);cancel.recycle();showPanel(true);panel.prepareDrag();panel.dispatchTouchEvent(edgeDown);edgeOpening=true;

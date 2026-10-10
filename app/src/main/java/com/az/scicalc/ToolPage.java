@@ -20,6 +20,7 @@ class ToolPage extends LinearLayout {
   title=text(c,name,24);header.addView(title,new LayoutParams(0,dp(64),1));addView(header,new LayoutParams(-1,dp(64)));
   scroll=new ScrollView(c);scroll.setFillViewport(true);body=new LinearLayout(c);body.setOrientation(VERTICAL);body.setPadding(0,0,0,dp(18));scroll.addView(body);addView(scroll,new LayoutParams(-1,0,1));
  }
+ @Override protected void onAttachedToWindow(){super.onAttachedToWindow();if(!embedded){WindowInsets insets=getRootWindowInsets();if(insets!=null){android.graphics.Insets bars=insets.getInsets(WindowInsets.Type.systemBars()|WindowInsets.Type.displayCutout());setPadding(bars.left,bars.top,bars.right,bars.bottom);}}}
  int dp(float n){return Math.round(n*getResources().getDisplayMetrics().density);}
  static TextView text(Context c,String s,float size){TextView t=new TextView(c);t.setText(s);t.setTextColor(TEXT);t.setTextSize(android.util.TypedValue.COMPLEX_UNIT_DIP,size);t.setTypeface(UiFonts.REGULAR);t.setGravity(Gravity.CENTER_VERTICAL);return t;}
  static GradientDrawable rounded(Context c,int color,float radius){GradientDrawable b=new GradientDrawable();b.setColor(color);b.setCornerRadius(radius*c.getResources().getDisplayMetrics().density);b.setStroke(1,0xff53545e);return b;}

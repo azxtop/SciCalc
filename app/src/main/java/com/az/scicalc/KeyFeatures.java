@@ -17,6 +17,8 @@ final class KeyFeatures {
  private final ArrayList<String> calcVariables=new ArrayList<>();
  private int calcIndex;
  KeyFeatures(MainActivity app){this.app=app;}
+ JSONObject savePage(){JSONObject j=new JSONObject();try{j.put("memoryState",memoryState).put("calcSource",calcSource).put("calcTree",calcTree).put("substitutions",new JSONObject(substitutions)).put("calcVariables",new JSONArray(calcVariables)).put("calcIndex",calcIndex);}catch(Exception ignored){}return j;}
+ void restorePage(JSONObject j){if(j==null)return;memoryState=j.optString("memoryState");calcSource=j.optString("calcSource");calcTree=j.optString("calcTree");calcIndex=j.optInt("calcIndex");JSONObject values=j.optJSONObject("substitutions");if(values!=null){Iterator<String> it=values.keys();while(it.hasNext()){String k=it.next();substitutions.put(k,values.optString(k));}}JSONArray names=j.optJSONArray("calcVariables");if(names!=null)for(int i=0;i<names.length();i++)calcVariables.add(names.optString(i));}
  void cancelEntry(){memoryState="";calcSource="";calcVariables.clear();substitutions.clear();app.view.memoryState="";app.view.prompt="";}
  boolean handle(String action){
   if(!memoryState.isEmpty()&&action.startsWith("var:")){String key=action.substring(4),state=memoryState;memoryState="";app.view.memoryState="";
@@ -48,7 +50,7 @@ final class KeyFeatures {
    case "solve":solveCurrent();return true;
    case "recall":case "store":memoryState=action.equals("recall")?"RCL":"STO";app.view.memoryState=memoryState;app.view.alpha=true;app.view.invalidate();return true;
    case "clearVars":new AlertDialog.Builder(app,R.style.ReferenceHelpTheme).setMessage("你想要清除所有的变量值吗？").setNegativeButton("确定",(d,w)->{app.variables.clear();app.save();}).setPositiveButton("取消",null).show();return true;
-   case "previous":edit(()->app.formula.answer(app.previous));return true;
+   case "previous":edit(()->app.formula.answer(app.previous,"PreAns"));return true;
    case "answer":edit(()->app.formula.answer(app.ans));return true;
    case "logbase":edit(()->app.formula.call("LogBase",2));return true;
    case "mixed":edit(()->app.formula.template("mixed",""));return true;

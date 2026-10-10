@@ -17,12 +17,22 @@ public final class CalculatorView extends View {
  public boolean skinPreview=false;
  public float drawerProgress=0;public float resultMenuTop=400;public float contextMenuTop=240;private float maxScroll=0;
  public boolean shift=false,alpha=false,approximate=false,busy=false,basic=false;
+ public String busyLabel="计算中…";
  public boolean second=false,displayMono=true,gridActive=false;
  public boolean blinkCursor=true,divisionSlash=false,multiplicationStar=false,groupThousands=true,groupDecimals=true,decimalComma=false,fractionMultiply=true,descendingPowers=false,showCalcInfo=true,relativePercent=true,implicitPriority=true;
  public boolean baseMode=false;public int baseRadix=10,baseBits=32,workflowStep=-1;public String workflowCaption="",coefficientTitle="";
  public int ansStyle=2,keyLabelStyle=0;public float keyFontScale=1;
  public String memoryState="",prompt="",formatLabel="NORM",gridTitle="",search="";
  public float displayScale=1;public int digits=11,gridRow=0,gridCol=0;
+ private float headerOffset=0;
+ void setTabHeaderPixels(float bottom,int width,int height){setTabHeader(bottom/outputScaleFor(width,height));}
+ static float outputScaleFor(int width,int height){return width>height?Math.min(width/2160f,height/1080f):height/2400f;}
+ private float outputRight(float inset){return outputWidth-inset;}
+ private float outputClipBottom(){return outputBottom-5;}
+ private float touchContentTop(){return contentTop()*outputScale/sy;}
+ private float touchOutputBottom(){return outputBottom*outputScale/sy;}
+ private float touchClipBottom(){return outputClipBottom()*outputScale/sy;}
+ void setTabHeader(float bottom){float next=Math.max(0,bottom-60);if(next!=headerOffset){headerOffset=next;invalidate();}}
  public String[][] grid=new String[0][];public String[] gridHeaders=new String[0];
  static final class TapeLine {
   String tree,exact,display;final Formula formula=new Formula();String layoutKey="";Picture picture;RenderNode node;float height,inputHeight;
@@ -47,12 +57,21 @@ public final class CalculatorView extends View {
  void updateLastDisplay(String value){if(!inputActive&&editor.empty()&&!tape.isEmpty()){TapeLine last=tape.get(tape.size()-1);last.display=value;last.layoutKey="";}invalidate();}
  void editing(){stopScroll();scroll=0;inputActive=true;}
  private void stopScroll(){scroller.forceFinished(true);}
+ void freezeScroll(){stopScroll();}
  String saveTape(){org.json.JSONArray a=new org.json.JSONArray();try{for(TapeLine l:tape)a.put(new org.json.JSONObject().put("tree",l.tree).put("exact",l.exact).put("display",l.display));}catch(Exception ignored){}return a.toString();}
  void restoreTape(String source){try{org.json.JSONArray a=new org.json.JSONArray(source);for(int i=0;i<a.length();i++){org.json.JSONObject j=a.getJSONObject(i);tape.add(new TapeLine(j.getString("tree"),j.getString("exact"),j.getString("display")));}}catch(Exception ignored){}}
+ org.json.JSONObject savePage(){
+  org.json.JSONObject j=new org.json.JSONObject();try{j.put("tape",saveTape()).put("result",result).put("message",message).put("mode",mode).put("inputActive",inputActive).put("scroll",scroll).put("basic",basic).put("second",second).put("shift",shift).put("alpha",alpha).put("gridActive",gridActive).put("grid",new org.json.JSONArray(Arrays.asList(grid))).put("headers",new org.json.JSONArray(Arrays.asList(gridHeaders))).put("gridTitle",gridTitle).put("gridRow",gridRow).put("gridCol",gridCol).put("baseMode",baseMode).put("baseRadix",baseRadix).put("baseBits",baseBits).put("workflowStep",workflowStep).put("workflowCaption",workflowCaption).put("coefficientTitle",coefficientTitle).put("memoryState",memoryState).put("prompt",prompt).put("busy",busy);}catch(Exception ignored){}return j;
+ }
+ void restorePage(org.json.JSONObject j){
+  if(j==null)return;try{restoreTape(j.optString("tape","[]"));result=j.optString("result");message=j.optString("message");mode=j.optString("mode","计算");inputActive=j.optBoolean("inputActive",true);scroll=Math.max(0,(float)j.optDouble("scroll"));basic=j.optBoolean("basic");second=j.optBoolean("second");shift=j.optBoolean("shift");alpha=j.optBoolean("alpha");gridActive=j.optBoolean("gridActive");org.json.JSONArray rows=j.optJSONArray("grid");if(rows!=null){grid=new String[rows.length()][];for(int r=0;r<rows.length();r++){org.json.JSONArray row=rows.getJSONArray(r);grid[r]=new String[row.length()];for(int col=0;col<row.length();col++)grid[r][col]=row.optString(col);}}org.json.JSONArray headers=j.optJSONArray("headers");if(headers!=null){gridHeaders=new String[headers.length()];for(int i=0;i<headers.length();i++)gridHeaders[i]=headers.optString(i);}gridTitle=j.optString("gridTitle");gridRow=Math.max(0,Math.min(Math.max(0,grid.length-1),j.optInt("gridRow")));gridCol=Math.max(0,Math.min(Math.max(0,gridHeaders.length-1),j.optInt("gridCol")));baseMode=j.optBoolean("baseMode");baseRadix=j.optInt("baseRadix",10);baseBits=j.optInt("baseBits",32);workflowStep=j.optInt("workflowStep",-1);workflowCaption=j.optString("workflowCaption");coefficientTitle=j.optString("coefficientTitle");memoryState=j.optString("memoryState");prompt=j.optString("prompt");if(j.optBoolean("busy")){busy=false;message="上次计算未完成，按 = 重新计算";}}catch(Exception ignored){}
+ }
+ int[] tabColors(){return new int[]{ink(bg),theme==8?Color.BLACK:0xffdbdcd8,ink(0xff504d53)};}
+ private float contentTop(){return skinPreview?132:landscape?Math.min(outputBottom-120,132+headerOffset):Math.max(254,132+headerOffset);}
  private final Paint p=new Paint(3);private final List<Key> keys=new ArrayList<>(),basicKeys=new ArrayList<>();
  private final Formula.Renderer renderer=new Formula.Renderer();private final Picture cursorLayoutProbe=new Picture();private final Listener listener;
  private final RenderNode keyboardNode=new RenderNode("calculator-keyboard");private String keyboardLayout="";private boolean recordingKeyboard;
- private float sx=1,sy=1,formulaX=24;private long downTime;private Bitmap texture;
+ private boolean landscape;private float outputScale=1,outputWidth=1080,outputBottom=772;private float sx=1,sy=1,formulaX=24;private long downTime;private Bitmap texture;
  private int theme=0;private boolean sound=false,vibration=true;
  public static final String[] THEMES={"Calc350es","Retro","深海","森林","暖棕","石墨","暮蓝","莓酒","米白","黑铜"};
  private static final int[][] PALETTES={{0xff16191c,0xffd4e4e3,0xff504d53,0xff272b31,0xffe78e51,0xfffdc12b,0xff7066ad},{0xff39382f,0xffc6d2a9,0xff686354,0xff353630,0xffe59c64,0xffe6c77a,0xff8a7c6b},{0xff102331,0xffd1e6ee,0xff3c6078,0xff20394c,0xffefab63,0xffffd45c,0xff616fc0},{0xff162820,0xffd7e7c9,0xff49634f,0xff233d32,0xffe8a16a,0xffdcc662,0xff688f83},{0xff35251e,0xffeedccb,0xff796254,0xff47362d,0xffe79465,0xffecc576,0xffad8175},{0xff1b1b20,0xffdedee4,0xff555560,0xff2d2d36,0xffdda0ae,0xffe0cf87,0xff8884ad},{0xff101a2c,0xffdbe5ef,0xff33465e,0xff1e2d42,0xffe6a66c,0xffdac274,0xff728eb5},{0xff261b25,0xfff0e0e8,0xff624451,0xff392937,0xffcb8871,0xffe3bd78,0xffac86a2},{0xffe6e3db,0xfff6f4ee,0xffd2cec5,0xfff0ede5,0xffca704c,0xffd8b765,0xffb4abb9},{0xff151516,0xffe5e0d6,0xff3c3936,0xff232221,0xffbe8054,0xffcbb17b,0xff8f8b84}};
@@ -105,7 +124,7 @@ public final class CalculatorView extends View {
  }
  private static boolean referenceRow(float y){switch(Math.round(y)){case 762:case 935:case 1109:case 1283:case 1457:case 1635:case 1830:case 2026:case 2222:return true;default:return false;}}
  public CalculatorView(Context c,Formula e,Listener l){super(c);editor=e;listener=l;scroller=new OverScroller(c);ViewConfiguration config=ViewConfiguration.get(c);touchSlop=config.getScaledTouchSlop();minVelocity=config.getScaledMinimumFlingVelocity();maxVelocity=config.getScaledMaximumFlingVelocity();setFocusable(true);setContentDescription("科学计算器，完整键盘与结构化公式");layoutKeys();}
- @Override protected void onSizeChanged(int w,int h,int ow,int oh){sx=w/1080f;sy=h/2400f;}
+ @Override protected void onSizeChanged(int w,int h,int ow,int oh){cancelTouches();sx=w/1080f;sy=h/2400f;landscape=!skinPreview&&w>h;outputScale=landscape?outputScaleFor(w,h):sy;outputWidth=landscape?w/outputScale:1080;outputBottom=landscape?h*.38f/outputScale:772;keyboardLayout="";}
  private void key(float x,float y,float w,float h,String label,String action,String sec,String alt,String third,String aa,int color,boolean bar){keys.add(new Key(x,y,w,h,label,action,sec,alt,third,aa,color,bar));}
  private void simple(float x,float y,float w,float h,String label,String action,int color,boolean bar){key(x,y,w,h,label,action,"","","","",color,bar);}
  private void layoutKeys(){
@@ -141,7 +160,7 @@ public final class CalculatorView extends View {
   String[][] ba={{"reciprocal","left","right","delete","clear"},{"tpl:frac","tpl:pow","tpl:sqrt","factor","memoryClear"},{"text:(","text:)","memoryAdd","memorySub","memoryRecall"}};
   for(int row=0;row<3;row++)for(int col=0;col<5;col++)basicKeys.add(new Key(13+216*col,821+180*row,194,114,bl[row][col],ba[row][col],"","","","",row==0&&col>=3?orange:0xff504d53,false));
   String[][] bn={{"7","8","9","÷"},{"4","5","6","×"},{"1","2","3","−"},{"%","0",".","+"},{"S⇌D","Exp","Ans","="}};
-  for(int row=0;row<5;row++)for(int col=0;col<4;col++){String a=bn[row][col];basicKeys.add(new Key(13+270*col,1362+212*row,246,146,a,a.equals("=")?"evaluate":a.equals("S⇌D")?"decimal":a.equals("Exp")?"scientific":a.equals("%")?"text:/100":"text:"+a,"","","","",0xff272b31,false));}
+  for(int row=0;row<5;row++)for(int col=0;col<4;col++){String a=bn[row][col];basicKeys.add(new Key(13+270*col,1362+212*row,246,146,a,a.equals("=")?"evaluate":a.equals("Ans")?"answer":a.equals("S⇌D")?"decimal":a.equals("Exp")?"scientific":a.equals("%")?"text:/100":"text:"+a,"","","","",0xff272b31,false));}
  }
  private void secondKey(int row,int col,String label,String action,String sec,String alt,String third,String aa){secondKeys.add(new Key(13+180*col,935+174*row,154,112,label,action,sec,alt,third,aa,0xff504d53,false));}
  private void layoutSecond(){
@@ -197,61 +216,80 @@ public final class CalculatorView extends View {
   if(texture==null){texture=Bitmap.createBitmap(12,12,Bitmap.Config.ARGB_8888);Canvas tile=new Canvas(texture);tile.drawColor(ink(bg));Paint dot=new Paint(3);dot.setColor(theme==8?0xffd9d5cc:0xff050707);tile.drawOval(1,1,4,3,dot);tile.drawOval(7,7,10,9,dot);dot.setColor(theme==8?0xffeeeae2:0xff25292b);tile.drawOval(1,3,4,4,dot);tile.drawOval(7,9,10,10,dot);}
   p.setShader(new BitmapShader(texture,Shader.TileMode.REPEAT,Shader.TileMode.REPEAT));p.setStyle(Paint.Style.FILL);c.drawRect(0,0,1080,2400,p);p.setShader(null);
  }
- @Override protected void onDraw(Canvas canvas){super.onDraw(canvas);canvas.save();canvas.scale(sx,sy);Canvas c=canvas;background(c);
-  text(c,"S",24,106,32,shift?yellow:0xff282c2e,Paint.Align.LEFT,BOLD);text(c,"A",69,106,32,alpha?purple:0xff282c2e,Paint.Align.LEFT,BOLD);
-  screenActions.clear();text(c,"STO",112,106,32,memoryState.equals("STO")?yellow:0xff282c2e,Paint.Align.LEFT,BOLD);text(c,"RCL",183,106,32,memoryState.equals("RCL")?yellow:0xff282c2e,Paint.Align.LEFT,BOLD);text(c,formatLabel+"-"+digits+" "+(mode.equals("计算")?"MATH":mode)+" "+(approximate?"DECI":"FRAC"),262,106,32,0xffdbdcd8,Paint.Align.LEFT,BOLD);
-  screenActions.put(new RectF(12,60,62,128),"shift");screenActions.put(new RectF(62,60,109,128),"alpha");screenActions.put(new RectF(110,60,180,128),"store");screenActions.put(new RectF(180,60,257,128),"recall");screenActions.put(new RectF(260,60,452,128),"formatStatus");screenActions.put(new RectF(453,60,551,128),"modeStatus");screenActions.put(new RectF(552,60,665,128),"decimal");
-  fill(c,new RectF(15,130,1065,DISPLAY_BOTTOM),25,panel);drawFormula(c);
+ @Override protected void onDraw(Canvas canvas){super.onDraw(canvas);canvas.save();canvas.scale(sx,sy);Canvas c=canvas;background(c);canvas.restore();canvas.save();canvas.scale(landscape?outputScale:sx,outputScale);
+  float header=skinPreview?0:headerOffset;c.save();c.translate(0,header);
+  float statusBaseline=skinPreview?106:100,statusBottom=skinPreview?128:120;
+  text(c,"S",24,statusBaseline,32,shift?yellow:0xff282c2e,Paint.Align.LEFT,BOLD);text(c,"A",69,statusBaseline,32,alpha?purple:0xff282c2e,Paint.Align.LEFT,BOLD);
+  screenActions.clear();text(c,"STO",112,statusBaseline,32,memoryState.equals("STO")?yellow:0xff282c2e,Paint.Align.LEFT,BOLD);text(c,"RCL",183,statusBaseline,32,memoryState.equals("RCL")?yellow:0xff282c2e,Paint.Align.LEFT,BOLD);text(c,formatLabel+"-"+digits+" "+(mode.equals("计算")?"MATH":mode)+" "+(approximate?"DECI":"FRAC"),262,statusBaseline,32,0xffdbdcd8,Paint.Align.LEFT,BOLD);
+  screenActions.put(new RectF(12,60,62,statusBottom),"shift");screenActions.put(new RectF(62,60,109,statusBottom),"alpha");screenActions.put(new RectF(110,60,180,statusBottom),"store");screenActions.put(new RectF(180,60,257,statusBottom),"recall");screenActions.put(new RectF(260,60,452,statusBottom),"formatStatus");screenActions.put(new RectF(453,60,551,statusBottom),"modeStatus");screenActions.put(new RectF(552,60,665,statusBottom),"decimal");
+  c.restore();for(RectF r:screenActions.keySet())r.offset(0,header);
+  fill(c,new RectF(15,(skinPreview?130:122)+header,outputRight(15),outputBottom),25,panel);drawFormula(c);
+  if(busy){RectF cancel=new RectF(outputRight(218),outputBottom-102,outputRight(30),outputBottom-8);fill(c,cancel,12,0xffc1d6d1);text(c,"取消",cancel.centerX(),cancel.centerY()+15,38,Color.BLACK,Paint.Align.CENTER,SANS);screenActions.put(cancel,"cancelCalculation");}
+  if(landscape){
+   for(RectF hit:screenActions.keySet()){hit.left*=outputScale/sx;hit.right*=outputScale/sx;hit.top*=outputScale/sy;hit.bottom*=outputScale/sy;}
+   contextMenuTop*=outputScale/sy;
+  }
+  canvas.restore();canvas.save();canvas.scale(sx,sy);
   if(c.isHardwareAccelerated()){
-   String layout=theme+":"+basic+":"+second+":"+baseMode+":"+baseRadix+":"+gridActive+":"+mode+":"+angle+":"+keyLabelStyle+":"+keyFontScale+":"+divisionSlash+":"+multiplicationStar+":"+skinPreview+":"+(!editor.empty()&&editor.complete()||!inputActive&&!tape.isEmpty());
+   String layout=landscape+":"+theme+":"+basic+":"+second+":"+baseMode+":"+baseRadix+":"+gridActive+":"+mode+":"+angle+":"+keyLabelStyle+":"+keyFontScale+":"+divisionSlash+":"+multiplicationStar+":"+skinPreview+":"+(!editor.empty()&&editor.complete()||!inputActive&&!tape.isEmpty());
    if(!layout.equals(keyboardLayout)||!keyboardNode.hasDisplayList()){keyboardNode.setPosition(0,0,1080,2400);Canvas cached=keyboardNode.beginRecording();recordingKeyboard=true;for(Key k:activeKeys())if(visible(k))drawWholeKey(cached,k);recordingKeyboard=false;keyboardNode.endRecording();keyboardLayout=layout;}
    c.drawRenderNode(keyboardNode);long now=android.os.SystemClock.uptimeMillis();for(Key k:activeKeys())if(visible(k)){if(k.ripple!=null&&(isKeyDown(k)||now<k.rippleUntil))drawWholeKey(c,k);else if(k.action.equals("menu"))drawWholeKey(c,k);}
   }else for(Key k:activeKeys())if(visible(k))drawWholeKey(c,k);
   canvas.restore();
  }
- private void drawWholeKey(Canvas c,Key k){c.save();c.translate(0,k.yOffset);c.scale(1,k.yScale);drawKey(c,k);if(k.action.equals("dpad"))drawPad(c,k.r);else if(k.toolbar)drawToolbar(c,k);else drawLabel(c,k);drawSecondary(c,k);c.restore();}
+ private float keyXScale(Key k){return landscape?.5f:1;}
+ private boolean basicLandscape(){return basic&&!baseMode&&!second;}
+ private boolean numericLandscape(Key k){return !k.toolbar&&k.r.top>=(basicLandscape()?1362:1635);}
+ private float keyXOffset(Key k){return landscape&&numericLandscape(k)?540:landscape&&k.toolbar?k.r.left*.5f:0;}
+ private float keyYScale(Key k){return !landscape?1:k.toolbar?1.5f:basicLandscape()?1140f/(numericLandscape(k)?926:445):numericLandscape(k)?1140f/670:1140f/754;}
+ private float keyYOffset(Key k){return !landscape?0:k.toolbar?930-786*1.5f:1180-(basicLandscape()?(numericLandscape(k)?1434:935):(numericLandscape(k)?1688:880))*keyYScale(k);}
+ private float keyX(Key k,float x){return (x-keyXOffset(k))/keyXScale(k);}
+ private float keyY(Key k,float y){return (y-keyYOffset(k))/keyYScale(k);}
+ private void drawWholeKey(Canvas c,Key k){c.save();c.translate(keyXOffset(k),keyYOffset(k));c.scale(keyXScale(k),keyYScale(k));c.translate(0,k.yOffset);c.scale(1,k.yScale);drawKey(c,k);if(k.action.equals("dpad"))drawPad(c,k.r);else if(k.toolbar)drawToolbar(c,k);else drawLabel(c,k);drawSecondary(c,k);c.restore();}
  private void drawFormula(Canvas c){
-  if(gridActive){drawGrid(c);return;}if(workflowStep>=0||baseMode){drawWorkflow(c);return;}
+  if(gridActive||workflowStep>=0||baseMode){Set<RectF> headerActions=new HashSet<>(screenActions.keySet());float dy=contentTop()-132;c.save();c.clipRect(18,contentTop(),outputRight(18),outputClipBottom());c.translate(0,dy);if(gridActive)drawGrid(c);else drawWorkflow(c);c.restore();for(RectF r:screenActions.keySet())if(!headerActions.contains(r))r.offset(0,dy);return;}
   renderer.spots.clear();renderer.editor=editor;renderer.color=Color.BLACK;renderer.accent=0xff8550ff;configure(renderer);renderer.showCursor=!skinPreview&&(!blinkCursor||System.currentTimeMillis()%1000<600);
   renderer.typeface=displayMono?MONO:SANS;float z=60*displayScale;Formula.Box b=renderer.measure(editor.root,z);
-  float baseline=144+b.a,available=1020;formulaX=24;
+  float baseline=contentTop()+12+b.a,available=outputWidth-60;formulaX=24;
   if(b.w>available){
    // Collect cursor geometry off screen. Drawing this pass on the real canvas
    // overlays the unscrolled expression with the scrolled expression below.
    float caret=b.w;
    if(editor.cursor!=editor.root||editor.index!=editor.root.nodes.size()){
-    Canvas probe=cursorLayoutProbe.beginRecording(1080,2400);
+    Canvas probe=cursorLayoutProbe.beginRecording((int)Math.ceil(outputWidth),2400);
     try{renderer.draw(probe,editor.root,0,baseline,z);}finally{cursorLayoutProbe.endRecording();}
     for(Formula.Spot spot:renderer.spots)if(spot.row==editor.cursor&&spot.index==editor.index)caret=spot.x;
    }
    formulaX=24-Math.max(0,Math.min(b.w-available,caret-available*.75f));renderer.spots.clear();}
-  c.save();c.clipRect(18,132,1062,DISPLAY_CLIP_BOTTOM);
-  float total=0;String layoutKey=z+":"+displayMono+":"+groupThousands+":"+groupDecimals+":"+decimalComma+":"+ansStyle+":"+fractionMultiply+":"+descendingPowers+":"+showCalcInfo+":"+relativePercent+":"+implicitPriority;
+  c.save();c.clipRect(18,contentTop(),outputRight(18),outputClipBottom());
+  float total=0;String layoutKey=outputWidth+":"+z+":"+displayMono+":"+groupThousands+":"+groupDecimals+":"+decimalComma+":"+ansStyle+":"+fractionMultiply+":"+descendingPowers+":"+showCalcInfo+":"+relativePercent+":"+implicitPriority;
   for(TapeLine l:tape){if(!layoutKey.equals(l.layoutKey))layoutTape(l,layoutKey,z);total+=l.height;}
-  float currentHeight=!inputActive&&editor.empty()?0:Math.max(150,b.a+b.d+130+(prompt.isEmpty()?0:86));maxScroll=Math.max(0,total+currentHeight-(DISPLAY_CLIP_BOTTOM-165));scroll=Math.min(scroll,maxScroll);float at=144-maxScroll+scroll;
+  float currentHeight=!inputActive&&editor.empty()?0:Math.max(150,b.a+b.d+130+(prompt.isEmpty()?0:86));
+  if(landscape&&currentHeight>0){Formula.Box answer=renderer.measure(displayResult(result),z);currentHeight=b.a+b.d+(result.isEmpty()?12:answer.a+answer.d+28+(calcInfo(editor.source(1)).isEmpty()?0:32))+(prompt.isEmpty()?0:86);}
+  maxScroll=Math.max(0,total+currentHeight-(outputClipBottom()-contentTop()-(landscape?12:33)));scroll=Math.min(scroll,maxScroll);float at=contentTop()+12-maxScroll+scroll;
   for(int i=0;i<tape.size();i++){
    TapeLine l=tape.get(i);float h=l.height;
-   if(at+h>132&&at<DISPLAY_CLIP_BOTTOM){c.save();c.translate(0,at);if(c.isHardwareAccelerated()){ensureTapeNode(l);c.drawRenderNode(l.node);}else c.drawPicture(l.picture);c.restore();
-    screenActions.put(new RectF(90,at,1060,at+l.inputHeight+16),"tapeedit:"+i);
-    screenActions.put(new RectF(18,at+l.inputHeight+16,1060,at+h),"resultmenu:"+i);
-    if(i<tape.size()-1||inputActive)line(c,18,at+h-2,1062,at+h-2,0xff98aaa8,1);
+   if(at+h>contentTop()&&at<outputClipBottom()){c.save();c.translate(0,at);if(c.isHardwareAccelerated()){ensureTapeNode(l);c.drawRenderNode(l.node);}else c.drawPicture(l.picture);c.restore();
+    screenActions.put(new RectF(90,at,outputRight(20),at+l.inputHeight+16),"tapeedit:"+i);
+    screenActions.put(new RectF(18,at+l.inputHeight+16,outputRight(20),at+h),"resultmenu:"+i);
+    if(i<tape.size()-1||inputActive)line(c,18,at+h-2,outputRight(18),at+h-2,0xff98aaa8,1);
    }at+=h;
   }
   baseline=at+b.a+(prompt.isEmpty()?0:86);contextMenuTop=baseline+b.d+8;if(!prompt.isEmpty())text(c,prompt,28,at+60,60,Color.BLACK,Paint.Align.LEFT,SANS);
   if(editor.empty()){if(renderer.showCursor&&inputActive)line(c,26,at,26,at+77,renderer.accent,5);}else {renderer.spots.clear();renderer.draw(c,editor.root,formulaX,baseline,z);if(!skinPreview)renderer.drawCursor(c,z);}
   if(!result.isEmpty()){
-   Formula.Row row=displayResult(result);float rz=z;Formula.Box rb=renderer.measure(row,rz);float resultWidth=940;if(rb.w>resultWidth)rz*=Math.max(.35f,resultWidth/rb.w);rb=renderer.measure(row,rz);Formula.Renderer out=new Formula.Renderer();configure(out);out.color=Color.BLACK;out.showCursor=false;
-   if(!editor.empty()){float resultTop=skinPreview?700:baseline+b.d+28;c.save();c.clipRect(104,resultTop-8,1058,DISPLAY_CLIP_BOTTOM);out.draw(c,row,1050-rb.w,resultTop+rb.a,rz);c.restore();String info=calcInfo(editor.source(1));if(!info.isEmpty())text(c,info,1050,resultTop+rb.a+rb.d+32,24,0xff64716f,Paint.Align.RIGHT,SANS);screenActions.put(new RectF(18,resultTop-8,1060,resultTop+Math.max(64,rb.a+rb.d)+8),"resultmenu");if(!skinPreview)for(int i=0;i<3;i++){p.setColor(0xff728381);c.drawCircle(57,resultTop+21+i*15,5.5f,p);}}
+   Formula.Row row=displayResult(result);float rz=z;Formula.Box rb=renderer.measure(row,rz);float resultWidth=outputWidth-140;if(rb.w>resultWidth)rz*=Math.max(.35f,resultWidth/rb.w);rb=renderer.measure(row,rz);Formula.Renderer out=new Formula.Renderer();configure(out);out.color=Color.BLACK;out.showCursor=false;
+   if(!editor.empty()){float resultTop=skinPreview?700:baseline+b.d+28;c.save();c.clipRect(104,resultTop-8,outputRight(22),outputClipBottom());out.draw(c,row,outputRight(30)-rb.w,resultTop+rb.a,rz);c.restore();String info=calcInfo(editor.source(1));if(!info.isEmpty())text(c,info,outputRight(30),resultTop+rb.a+rb.d+32,24,0xff64716f,Paint.Align.RIGHT,SANS);screenActions.put(new RectF(18,resultTop-8,outputRight(20),resultTop+Math.max(64,rb.a+rb.d)+8),"resultmenu");if(!skinPreview)for(int i=0;i<3;i++){p.setColor(0xff728381);c.drawCircle(57,resultTop+21+i*15,5.5f,p);}}
   }
-  if(busy||!message.isEmpty())text(c,busy?"计算中…":message,28,DISPLAY_BOTTOM-25,26,busy?0xff688b82:0xffad5041,Paint.Align.LEFT,SANS);c.restore();
+  if(busy||!message.isEmpty())text(c,busy?busyLabel:message,28,outputBottom-25,26,busy?0xff688b82:0xffad5041,Paint.Align.LEFT,SANS);c.restore();
  }
  private void layoutTape(TapeLine l,String key,float z){
   Formula.Renderer r=new Formula.Renderer();configure(r);r.showCursor=false;r.color=Color.BLACK;
   Formula.Box in=r.measure(l.formula.root,z);Formula.Row row=displayResult(l.display);Formula.Box out=r.measure(row,z);
   String info=calcInfo(l.formula.source(1));l.inputHeight=in.a+in.d;l.height=l.inputHeight+out.a+out.d+42+(info.isEmpty()?0:30);
-  l.picture=new Picture();Canvas c=l.picture.beginRecording(1080,(int)Math.ceil(l.height));r.draw(c,l.formula.root,26,in.a,z);
-  float size=z;if(out.w>940){size*=940/out.w;out=r.measure(row,size);}r.spots.clear();r.draw(c,row,1044-out.w,l.height-16-out.d-(info.isEmpty()?0:30),size);
-  if(!info.isEmpty())text(c,info,1044,l.height-8,24,0xff64716f,Paint.Align.RIGHT,SANS);
+  l.picture=new Picture();Canvas c=l.picture.beginRecording((int)Math.ceil(outputWidth),(int)Math.ceil(l.height));r.draw(c,l.formula.root,26,in.a,z);
+  float size=z;if(out.w>outputWidth-140){size*=(outputWidth-140)/out.w;out=r.measure(row,size);}r.spots.clear();r.draw(c,row,outputRight(36)-out.w,l.height-16-out.d-(info.isEmpty()?0:30),size);
+  if(!info.isEmpty())text(c,info,outputRight(36),l.height-8,24,0xff64716f,Paint.Align.RIGHT,SANS);
   p.setShader(null);p.setStyle(Paint.Style.FILL);p.setColor(0xff728381);for(int d=0;d<3;d++)c.drawCircle(57,l.height-65+d*15,5.5f,p);
   l.picture.endRecording();if(l.node!=null)l.node.discardDisplayList();ensureTapeNode(l);l.layoutKey=key;
  }
@@ -260,32 +298,32 @@ public final class CalculatorView extends View {
  private void ensureTapeNode(TapeLine line){
   if(line.node==null)line.node=new RenderNode("calculation");
   if(!line.node.hasDisplayList()){
-   line.node.setPosition(0,0,1080,(int)Math.ceil(line.height));
+   line.node.setPosition(0,0,(int)Math.ceil(outputWidth),(int)Math.ceil(line.height));
    Canvas cached=line.node.beginRecording();
    try{cached.drawPicture(line.picture);}finally{line.node.endRecording();}
   }
  }
- @Override public void computeScroll(){if(scroller.computeScrollOffset()){scroll=scroller.getCurrY()/sy;postInvalidateOnAnimation();}}
+ @Override public void computeScroll(){if(scroller.computeScrollOffset()){scroll=scroller.getCurrY()/outputScale;postInvalidateOnAnimation();}}
  private void flowButton(Canvas c,String label,RectF bounds,String action){p.setShader(null);p.setStyle(Paint.Style.STROKE);p.setColor(0xff64716f);p.setStrokeWidth(2);c.drawRoundRect(bounds,8,8,p);p.setStyle(Paint.Style.FILL);text(c,label,bounds.centerX(),bounds.centerY()+14,40,Color.BLACK,Paint.Align.CENTER,SANS);screenActions.put(bounds,action);}
  private void drawWorkflow(Canvas c){
-  c.save();c.clipRect(18,132,1062,DISPLAY_CLIP_BOTTOM);renderer.editor=editor;configure(renderer);renderer.color=Color.BLACK;renderer.showCursor=!skinPreview&&(!blinkCursor||System.currentTimeMillis()%1000<600);renderer.spots.clear();float z=60*displayScale,left=24,top=baseMode?200:230;
-  if(baseMode){String label=(baseRadix==10?"DECIMAL":baseRadix==16?"HEXADECIMAL":baseRadix==2?"BINARY":"OCTAL")+" "+baseBits+" bits signed";text(c,label,1050,182,42,Color.BLACK,Paint.Align.RIGHT,MONO);screenActions.put(new RectF(380,132,1060,200),"baseSettings");}
-  else{text(c,"第 "+(workflowStep+1)+"/5 步",36,187,40,Color.BLACK,Paint.Align.LEFT,SANS);flowButton(c,"[?]",new RectF(485,142,579,210),"workflowHelp");flowButton(c,"上一步",new RectF(613,142,783,210),"workflowPrevious");flowButton(c,"下一步 [=]",new RectF(817,142,1052,210),"workflowNext");line(c,18,222,1062,222,0xff8e9693,2);text(c,workflowCaption,26,290,60,Color.BLACK,Paint.Align.LEFT,MONO);p.setTextSize(60);p.setTypeface(MONO);left=26+p.measureText(workflowCaption)+22;}
+  c.save();c.clipRect(18,132,outputRight(18),outputClipBottom());renderer.editor=editor;configure(renderer);renderer.color=Color.BLACK;renderer.showCursor=!skinPreview&&(!blinkCursor||System.currentTimeMillis()%1000<600);renderer.spots.clear();float z=60*displayScale,left=24,top=baseMode?200:230;
+  if(baseMode){String label=(baseRadix==10?"DECIMAL":baseRadix==16?"HEXADECIMAL":baseRadix==2?"BINARY":"OCTAL")+" "+baseBits+" bits signed";text(c,label,outputRight(30),182,42,Color.BLACK,Paint.Align.RIGHT,MONO);screenActions.put(new RectF(380,132,outputRight(20),200),"baseSettings");}
+  else{text(c,"第 "+(workflowStep+1)+"/5 步",36,187,40,Color.BLACK,Paint.Align.LEFT,SANS);flowButton(c,"[?]",new RectF(485,142,579,210),"workflowHelp");flowButton(c,"上一步",new RectF(613,142,783,210),"workflowPrevious");flowButton(c,"下一步 [=]",new RectF(817,142,outputRight(28),210),"workflowNext");line(c,18,222,outputRight(18),222,0xff8e9693,2);text(c,workflowCaption,26,290,60,Color.BLACK,Paint.Align.LEFT,MONO);p.setTextSize(60);p.setTypeface(MONO);left=26+p.measureText(workflowCaption)+22;}
   Formula.Box b=renderer.measure(editor.root,z);float baseline=top+b.a;if(editor.empty()){if(renderer.showCursor)line(c,left,top,left,top+77,renderer.accent,5);}else{renderer.draw(c,editor.root,left,baseline,z);if(!skinPreview)renderer.drawCursor(c,z);}
-  if(baseMode&&!result.isEmpty()){text(c,result,1044,baseline+b.d+z+20,60,Color.BLACK,Paint.Align.RIGHT,SANS);}
-  if(!message.isEmpty())text(c,message,28,DISPLAY_BOTTOM-22,24,0xffad5041,Paint.Align.LEFT,SANS);c.restore();
+  if(baseMode&&!result.isEmpty()){text(c,result,outputRight(36),baseline+b.d+z+20,60,Color.BLACK,Paint.Align.RIGHT,SANS);}
+  if(busy||!message.isEmpty())text(c,busy?busyLabel:message,28,outputBottom-22-(contentTop()-132),24,0xffad5041,Paint.Align.LEFT,SANS);c.restore();
  }
  private Formula.Row displayResult(String value){String key=descendingPowers+":"+value;Formula.Row row=outputRows.get(key);if(row==null){row=Formula.result(descendingPowers?ResultFormat.orderPolynomial(value):value);outputRows.put(key,row);}return row;}
  private String calcInfo(String source){if(!showCalcInfo)return "";if(source.contains("%"))return relativePercent?"百分比：相对左侧数值":"百分比：除以 100";if(implicitPriority&&source.matches(".*[/÷][0-9.]+\\*.*"))return "隐式乘法优先";return "";}
  private void configure(Formula.Renderer r){r.typeface=displayMono?MONO:SANS;r.groupThousands=groupThousands;r.groupDecimals=groupDecimals;r.decimalComma=decimalComma;r.ansStyle=ansStyle;r.fractionMultiply=fractionMultiply;r.closeParen=getContext().getSharedPreferences("calculator",0).getBoolean("closeParen",false);}
  private void drawGrid(Canvas c){
-  c.save();c.clipRect(18,132,1062,DISPLAY_CLIP_BOTTOM);int cols=gridHeaders.length;if(cols==0){c.restore();return;}
-  boolean coefficients=mode.equals("SOLVE");float left=18,right=1062,width=(right-left)/cols,headerTop=coefficients?220:132,headerBottom=headerTop+82;if(coefficients){text(c,coefficientTitle,26,190,40,Color.BLACK,Paint.Align.LEFT,SANS);flowButton(c,"[?]",new RectF(714,142,829,210),"workflowHelp");flowButton(c,"求解 [=]",new RectF(852,142,1052,210),"workflowNext");line(c,left,220,right,220,0xff8e9693,2);}
-  for(int col=0;col<cols;col++){String label=gridHeaders[col];if(label.equals("Freq"))label="频率";if(label.equals("X"))label="x";if(label.equals("Y"))label="y";text(c,label,left+(col+.5f)*width,headerTop+52,46,Color.BLACK,Paint.Align.CENTER,SANS);if(col>0)line(c,left+col*width,headerTop,left+col*width,coefficients?headerBottom+grid.length*66:DISPLAY_CLIP_BOTTOM,0xff8e9693,2);}
+  c.save();c.clipRect(18,132,outputRight(18),outputClipBottom());int cols=gridHeaders.length;if(cols==0){c.restore();return;}
+  boolean coefficients=mode.equals("SOLVE");float left=18,right=outputRight(18),width=(right-left)/cols,headerTop=coefficients?220:132,headerBottom=headerTop+82;if(coefficients){text(c,coefficientTitle,26,190,40,Color.BLACK,Paint.Align.LEFT,SANS);flowButton(c,"[?]",new RectF(714,142,829,210),"workflowHelp");flowButton(c,"求解 [=]",new RectF(852,142,outputRight(28),210),"workflowNext");line(c,left,220,right,220,0xff8e9693,2);}
+  for(int col=0;col<cols;col++){String label=gridHeaders[col];if(label.equals("Freq"))label="频率";if(label.equals("X"))label="x";if(label.equals("Y"))label="y";text(c,label,left+(col+.5f)*width,headerTop+52,46,Color.BLACK,Paint.Align.CENTER,SANS);if(col>0)line(c,left+col*width,headerTop,left+col*width,coefficients?headerBottom+grid.length*66:outputClipBottom(),0xff8e9693,2);}
   line(c,left,headerBottom,right,headerBottom,0xff8e9693,2);
-  int start=Math.max(0,gridRow-5),last=grid.length-1;
+  int visibleRows=Math.max(1,(int)((outputClipBottom()-(contentTop()-132)-headerBottom-2)/66));int start=Math.max(0,gridRow-visibleRows+1),last=grid.length-1;
   if(mode.equals("STAT")){last=gridRow;for(int r=0;r<grid.length;r++)if(!grid[r][0].isEmpty())last=Math.max(last,r);}
-  for(int r=start;r<=Math.min(last,start+6);r++){float y=headerBottom+2+(r-start)*66;
+  for(int r=start;r<=Math.min(last,start+visibleRows-1);r++){float y=headerBottom+2+(r-start)*66;
    for(int col=0;col<cols;col++){RectF cell=new RectF(left+col*width,y,left+(col+1)*width,y+64);boolean selected=r==gridRow&&col==gridCol;
     if(selected){fill(c,cell,0,0xffcbd2e9);p.setStyle(Paint.Style.STROKE);p.setColor(purple);p.setStrokeWidth(5);c.drawRect(cell.left+2.5f,cell.top+2.5f,cell.right-2.5f,cell.bottom-2.5f,p);p.setStyle(Paint.Style.FILL);}
     String value=grid[r][col];if(mode.equals("STAT")&&grid[r][0].isEmpty()&&col==cols-1&&value.equals("1"))value="";
@@ -293,7 +331,7 @@ public final class CalculatorView extends View {
    }line(c,left,y+64,right,y+64,0xff8e9693,2);
   }
   if(coefficients){float y=headerBottom+grid.length*66+65;if(result.isEmpty())text(c,editor.source(1),28,y,60,Color.BLACK,Paint.Align.LEFT,SANS);else{Formula.Renderer out=new Formula.Renderer();configure(out);out.color=Color.BLACK;out.showCursor=false;Formula.Row answer=displayResult(result);Formula.Box box=out.measure(answer,50);out.draw(c,answer,28,y+box.a,50);}}
-  if(!message.isEmpty())text(c,message,28,DISPLAY_BOTTOM-22,24,0xffad5041,Paint.Align.LEFT,SANS);c.restore();
+  if(busy||!message.isEmpty())text(c,busy?busyLabel:message,28,outputBottom-22-(contentTop()-132),24,0xffad5041,Paint.Align.LEFT,SANS);c.restore();
  }
  private void drawLabel(Canvas c,Key k){
   float x=k.r.centerX(),y=k.r.centerY();int color=theme==8?0xff292b2d:k.fill==orange||k.fill==0xfffdc12b?Color.BLACK:k.fill==0xff272b31?0xffe2e2e0:0xfff6f9f6;
@@ -365,7 +403,8 @@ public final class CalculatorView extends View {
   timer.removeCallbacks(panelHold);keyTouches.clear();gesturePointer=-1;panelGesture=false;dragged=false;releaseVelocity();postInvalidateOnAnimation();
  }
  private void beginKey(int id,float x,float y,long eventTime){
-  for(Key k:activeKeys())if(visible(k)&&k.hitRect.contains(x,y)){
+  for(Key k:activeKeys())if(visible(k)&&k.hitRect.contains(keyX(k,x),keyY(k,y))){
+   x=keyX(k,x);y=keyY(k,y);
    // Android splits different key views by pointer. The first pointer owns
    // a key; lifting it while another remains on that same key cancels it.
    for(int i=0;i<keyTouches.size();i++){KeyTouch t=keyTouches.valueAt(i);if(t.key==k){keyTouches.put(id,t);return;}}
@@ -375,7 +414,7 @@ public final class CalculatorView extends View {
   }
  }
  private void finishKey(int id,float x,float y){
-  KeyTouch t=keyTouches.get(id);if(t==null)return;y=t.key.modelY(y);keyTouches.remove(id);
+  KeyTouch t=keyTouches.get(id);if(t==null)return;x=keyX(t.key,x);y=t.key.modelY(keyY(t.key,y));keyTouches.remove(id);
   for(int i=0;i<keyTouches.size();i++)if(keyTouches.valueAt(i)==t){if(t.pointer==id){t.cancelled=true;timer.removeCallbacks(t.hold);keyPressed(t.key,false,x,y);postInvalidateOnAnimation();}return;}
   timer.removeCallbacks(t.hold);keyPressed(t.key,false,x,y);postInvalidateOnAnimation();
   // Like Android View, a press remains armed until a MOVE leaves the target
@@ -383,13 +422,14 @@ public final class CalculatorView extends View {
   if(t.cancelled||t.held&&!isRepeating(t.key))return;
   Key k=t.key;if(k.action.equals("dpad"))listener.press(padAction(k,x,y));else if(shift&&!k.alt.isEmpty())listener.press(k.alt);else if(alpha&&!k.alphaAction.isEmpty())listener.press(k.alphaAction);else listener.press(k.action);performClick();
  }
+ private RectF cancelTouchBounds(){return new RectF((landscape?outputRight(218)*outputScale/sx:862),(outputBottom-102)*outputScale/sy,(landscape?outputRight(30)*outputScale/sx:1050),(outputBottom-8)*outputScale/sy);}
  @Override public boolean onTouchEvent(MotionEvent e){
   int action=e.getActionMasked(),index=e.getActionIndex(),id=e.getPointerId(index);float x=e.getX(index)/sx,y=e.getY(index)/sy;
   if(action==MotionEvent.ACTION_CANCEL){cancelTouches();return true;}
   if(action==MotionEvent.ACTION_DOWN){
    boolean wasMoving=!scroller.isFinished();cancelTouches();stopScroll();downTime=e.getEventTime();contextOpened=false;gestureTarget="";startX=x;startY=touchY=y;verticalDrag=false;
    beginKey(id,x,y,e.getEventTime());if(keyTouches.get(id)!=null)return true;
-   gesturePointer=id;panelGesture=y>=130&&y<DISPLAY_BOTTOM&&!gridActive&&workflowStep<0&&!baseMode;dragged=wasMoving&&panelGesture;verticalDrag=dragged;
+   gesturePointer=id;panelGesture=y>=touchContentTop()&&y<touchOutputBottom()&&!gridActive&&workflowStep<0&&!baseMode;dragged=wasMoving&&panelGesture;verticalDrag=dragged;
    if(panelGesture&&!dragged){for(Map.Entry<RectF,String> hit:screenActions.entrySet())if(hit.getKey().contains(x,y)){gestureTarget=hit.getValue();if(gestureTarget.startsWith("tapeedit:")||gestureTarget.startsWith("resultmenu"))contextMenuTop=hit.getKey().bottom+8;break;}timer.postAtTime(panelHold,downTime+ViewConfiguration.getLongPressTimeout());}
    velocity=VelocityTracker.obtain();velocity.addMovement(e);return true;
   }
@@ -403,26 +443,27 @@ public final class CalculatorView extends View {
    for(int i=0;i<keyTouches.size();i++){
     KeyTouch t=keyTouches.valueAt(i);if(t.pointer!=keyTouches.keyAt(i)||t.cancelled)continue;
     int pointerIndex=e.findPointerIndex(t.pointer);if(pointerIndex<0)continue;
-    t.x=e.getX(pointerIndex)/sx;t.y=t.key.modelY(e.getY(pointerIndex)/sy);RectF r=t.key.hitModelRect;float ySlop=touchSlop/(sy*t.key.yScale);
-    if(t.x<r.left-touchSlop/sx||t.x>=r.right+touchSlop/sx||t.y<r.top-ySlop||t.y>=r.bottom+ySlop){t.cancelled=true;timer.removeCallbacks(t.hold);keyPressed(t.key,false,t.x,t.y);postInvalidateOnAnimation();}
+    t.x=keyX(t.key,e.getX(pointerIndex)/sx);t.y=t.key.modelY(keyY(t.key,e.getY(pointerIndex)/sy));RectF r=t.key.hitModelRect;float ySlop=touchSlop/(sy*t.key.yScale*keyYScale(t.key));
+    if(t.x<r.left-touchSlop/(sx*keyXScale(t.key))||t.x>=r.right+touchSlop/(sx*keyXScale(t.key))||t.y<r.top-ySlop||t.y>=r.bottom+ySlop){t.cancelled=true;timer.removeCallbacks(t.hold);keyPressed(t.key,false,t.x,t.y);postInvalidateOnAnimation();}
     else if(t.key.action.equals("dpad"))t.repeat=padAction(t.key,t.x,t.y);
    }
    int pointerIndex=e.findPointerIndex(gesturePointer);if(pointerIndex<0)return true;x=e.getX(pointerIndex)/sx;y=e.getY(pointerIndex)/sy;
    if(panelGesture){if(!dragged&&Math.max(Math.abs(y-startY)*sy,Math.abs(x-startX)*sx)>touchSlop){timer.removeCallbacks(panelHold);dragged=true;verticalDrag=Math.abs(y-startY)*sy>=Math.abs(x-startX)*sx;touchY=startY+(y>startY?touchSlop/sy:-touchSlop/sy);}
-    if(dragged&&verticalDrag){scroll=Math.max(0,Math.min(maxScroll,scroll+y-touchY));touchY=y;postInvalidateOnAnimation();}
+    if(dragged&&verticalDrag){scroll=Math.max(0,Math.min(maxScroll,scroll+(y-touchY)*sy/outputScale));touchY=y;postInvalidateOnAnimation();}
    }return true;
   }
   if(action==MotionEvent.ACTION_UP||action==MotionEvent.ACTION_POINTER_UP){
    if(keyTouches.get(id)!=null){finishKey(id,x,y);return true;}
    if(id!=gesturePointer)return true;timer.removeCallbacks(panelHold);gesturePointer=-1;if(contextOpened){releaseVelocity();return true;}
-   if(dragged){if(velocity!=null&&panelGesture&&verticalDrag){velocity.computeCurrentVelocity(1000,maxVelocity);float v=velocity.getYVelocity(id);if(Math.abs(v)>minVelocity){scroller.fling(0,Math.round(scroll*sy),0,Math.round(v),0,0,0,Math.round(maxScroll*sy));postInvalidateOnAnimation();}}releaseVelocity();return true;}
+   if(dragged){if(velocity!=null&&panelGesture&&verticalDrag){velocity.computeCurrentVelocity(1000,maxVelocity);float v=velocity.getYVelocity(id);if(Math.abs(v)>minVelocity){scroller.fling(0,Math.round(scroll*outputScale),0,Math.round(v),0,0,0,Math.round(maxScroll*outputScale));postInvalidateOnAnimation();}}releaseVelocity();return true;}
    releaseVelocity();
+   if(busy&&cancelTouchBounds().contains(x,y)&&cancelTouchBounds().contains(startX,startY)){listener.press("cancelCalculation");performClick();return true;}
    for(Map.Entry<RectF,String> hit:screenActions.entrySet())if(hit.getKey().contains(x,y)&&hit.getKey().contains(startX,startY)){
     // Rows are laid out before clipping; their hidden portions are not targets.
-    if((hit.getValue().startsWith("tapeedit:")||hit.getValue().startsWith("resultmenu")||hit.getValue().startsWith("gridcell:"))&&(y<132||y>DISPLAY_CLIP_BOTTOM||startY<132||startY>DISPLAY_CLIP_BOTTOM))continue;
+    if((hit.getValue().startsWith("tapeedit:")||hit.getValue().startsWith("resultmenu")||hit.getValue().startsWith("gridcell:"))&&(y<touchContentTop()||y>touchClipBottom()||startY<touchContentTop()||startY>touchClipBottom()))continue;
     if(hit.getValue().startsWith("resultmenu"))resultMenuTop=Math.min(1050,hit.getKey().bottom+12);listener.press(hit.getValue());performClick();return true;
    }
-   if(panelGesture){renderer.select(x,y);postInvalidateOnAnimation();}return true;
+   if(panelGesture){renderer.select(landscape?x*sx/outputScale:x,y*sy/outputScale-(gridActive||workflowStep>=0||baseMode?contentTop()-132:0));postInvalidateOnAnimation();}return true;
   }return true;
  }
  private String padAction(Key k,float x,float y){float dx=x-k.r.centerX(),dy=y-k.r.centerY();return Math.abs(dx)>Math.abs(dy)?(dx>0?"right":"left"):(dy>0?"down":"up");}

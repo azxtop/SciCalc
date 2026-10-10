@@ -55,6 +55,7 @@ public final class CalculatorPanel extends View {
   rect(c,64,908,738,93,28,0xff393e44);p.setColor(0xff596068);p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(3);c.drawRoundRect(64,908,802,1001,28,28,p);p.setStyle(Paint.Style.FILL);rect(c,basic?433:68,912,361,85,24,0xffb488ff);text(c,"完整键盘",174,970,38,basic?0xffd7d3de:Color.BLACK);text(c,"基础键盘",545,970,38,basic?Color.BLACK:0xffd7d3de);
   rect(c,20,1052,826,140,44,0xff20282d);item(c,"graph","图形",1140);
   rect(c,20,1212,826,272,44,0xff20282d);item(c,"code","编程",1302);item(c,"help","在线手册",1427);
+  rect(c,20,1504,826,140,44,0xff20282d);item(c,"history","检查更新",1592);
  }
  private Hit hit(float x,float y){
   if(!drawer){
@@ -68,7 +69,7 @@ public final class CalculatorPanel extends View {
   if(y>=280&&y<880){int row=(int)((y-280)/125);if(row<5)return new Hit(new String[]{"history","variables","skin","settings","manual"}[row],new RectF(20,280+125*row,846,Math.min(880,405+125*row)));}
   if(y>=908&&y<1001&&x>=64&&x<=802)return new Hit(x<433?"fullKeyboard":"basicKeyboard",new RectF(x<433?64:433,908,x<433?433:802,1001));
   if(y>=1052&&y<1192)return new Hit("graph",new RectF(20,1052,846,1192));
-  if(y>=1212&&y<1484)return new Hit(y<1348?"programming":"onlineManual",new RectF(20,y<1348?1212:1348,846,y<1348?1348:1484));return null;
+  if(y>=1212&&y<1484)return new Hit(y<1348?"programming":"onlineManual",new RectF(20,y<1348?1212:1348,846,y<1348?1348:1484));if(y>=1504&&y<1644)return new Hit("checkUpdate",new RectF(20,1504,846,1644));return null;
  }
  private void pressed(boolean state,float x,float y){
   if(pressedHit==null||pressedHit.action.equals("close"))return;

@@ -21,7 +21,6 @@ final class ResultForms {
    BigInteger n=new BigInteger(parts[0]),d=new BigInteger(parts[1]);
    if(n.abs().compareTo(d)>0)out.put("带分数","["+ResultFormat.mixed(parts[0],parts[1])+"]");
   }else out.put("分数",rational);
-  try{double n=engine.value(value);if(Double.isFinite(n)&&Math.abs(n)<=Integer.MAX_VALUE)out.put("度分秒",dms(n));}catch(Exception ignored){}
   if(integer&&new BigInteger(rational).abs().compareTo(BigInteger.ONE)>0){
    try{out.put("质因数分解",MathFunctions.factorDisplay(engine.evaluate("FactorInteger("+rational+")",false)));}catch(Exception ignored){}
   }

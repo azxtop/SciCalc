@@ -24,7 +24,7 @@ public final class MathEngine {
     }
     public String script(String input){
         initialize();
-        IExpr out=evaluator.evaluateWithTimeout(input,8,TimeUnit.SECONDS,true,null);
+        IExpr out=controlled(input);
         if(out==null)throw new IllegalArgumentException("表达式没有产生结果");
         String result=out instanceof org.matheclipse.core.interfaces.INum n&&n.precision()<=16?Double.toString(n.getRealPart()):out.toString();
         if(result.equals("$Aborted"))throw new IllegalArgumentException("计算超过 8 秒，请简化表达式");
@@ -37,9 +37,23 @@ public final class MathEngine {
         java.io.ByteArrayOutputStream bytes=new java.io.ByteArrayOutputStream(){@Override public synchronized void write(byte[] b,int off,int len){super.write(b,off,Math.min(len,Math.max(0,32768-size())));}@Override public synchronized void write(int b){if(size()<32768)super.write(b);}};
         java.io.PrintStream output=new java.io.PrintStream(bytes,true,java.nio.charset.StandardCharsets.UTF_8);
         state.setOutPrintStream(output);state.setErrorPrintStream(output);
-        try{IExpr value=evaluator.evaluateWithTimeout(input,8,TimeUnit.SECONDS,true,null);if(value==null||value.toString().equals("$Aborted")||value.toString().equals("$Failed"))throw new IllegalArgumentException("脚本未完成，请检查表达式或缩短运行时间");String result=value.toString();output.flush();String printed=bytes.toString(java.nio.charset.StandardCharsets.UTF_8);if(bytes.size()>=32768)printed+="\n（输出已截断）";return new ScriptResult(result.equals("Null")?"":result,printed);}
+        try{IExpr value=controlled(input);if(value==null||value.toString().equals("$Aborted")||value.toString().equals("$Failed"))throw new IllegalArgumentException("脚本未完成，请检查表达式或缩短运行时间");String result=value.toString();output.flush();String printed=bytes.toString(java.nio.charset.StandardCharsets.UTF_8);if(bytes.size()>=32768)printed+="\n（输出已截断）";return new ScriptResult(result.equals("Null")?"":result,printed);}
         finally{state.setOutPrintStream(oldOut);state.setErrorPrintStream(oldError);output.close();}
     }
-    public double value(String s){initialize();return evaluator.evalf(normalize(s));}
+    private IExpr controlled(String input){
+        long timeout=CalculationBudget.remainingNanos();
+        try{IExpr out=evaluator.evaluateWithTimeout(input,timeout,TimeUnit.NANOSECONDS,true,null);CalculationBudget.remainingNanos();return out;}
+        catch(java.util.concurrent.CancellationException e){evaluator=null;throw e;}
+        finally{if(Thread.currentThread().isInterrupted())evaluator=null;}
+    }
+    public double value(String s){
+        String input=normalize(s);CalculationBudget.remainingNanos();
+        // Elementary numeric data needs no symbolic worker or control constructs.
+        boolean elementary=input.matches("[0-9A-Za-z+*/^().,\\s-]+");
+        java.util.regex.Matcher names=java.util.regex.Pattern.compile("[A-Za-z]+").matcher(input);
+        while(elementary&&names.find())elementary=names.group().matches("Pi|E|e|Sin|Cos|Tan|ArcSin|ArcCos|ArcTan|Sinh|Cosh|Tanh|Log|Log10|Exp|Sqrt|Abs|Floor|Ceiling|Round");
+        if(!elementary)return Double.parseDouble(evaluate(input,true,15));
+        initialize();double result=evaluator.evalf(input);CalculationBudget.remainingNanos();return result;
+    }
     public double at(String expression,String variable,double value){return value(expression.replaceAll("\\b"+variable+"\\b","("+Double.toString(value)+")"));}
 }

@@ -13,6 +13,7 @@ public final class Formula {
     public static final class Node {
         public final String kind;
         public String text;
+        public String answerName="Ans";
         public boolean closed=true;
         public int dmsMarked=3;
         public final List<Row> rows = new ArrayList<>();
@@ -24,7 +25,8 @@ public final class Formula {
         String source(int angle,boolean priority) {
             if(kind.equals("text")) return text.replace("×","*").replace("·","*").replace("÷","/").replace("−","-").replace("π","Pi").replace("∞","Infinity").replace("√","Sqrt");
             if(kind.equals("variable"))return text.equals("e")?"scvE":text;
-            if(kind.equals("symbol")||kind.equals("answer"))return text;
+            if(kind.equals("symbol"))return text;
+            if(kind.equals("answer"))return "("+text+")";
             if(kind.equals("token"))return text;
             String a=rows.get(0).source(angle,priority),factor=angle==0?"*Pi/180":angle==2?"*Pi/200":"";
             String b=rows.size()>1?rows.get(1).source(angle,priority):"";
@@ -73,8 +75,8 @@ public final class Formula {
             if(kind.equals("recurring"))return rows.get(0).source(1).matches("[0-9]+")&&rows.get(1).source(1).matches("[0-9]*")&&rows.get(2).source(1).matches("[0-9]+");
             return true;
         }
-        JSONObject json() throws Exception { JSONObject j=new JSONObject(); j.put("k",kind); j.put("t",text);if(!closed)j.put("closed",false);if(kind.equals("dms")){j.put("dmsMarked",dmsMarked);JSONArray hidden=new JSONArray();for(Row row:rows)hidden.put(row.defaultValue);j.put("dmsHidden",hidden);} JSONArray a=new JSONArray(); for(Row r:rows)a.put(r.json());j.put("r",a);return j; }
-        static Node from(JSONObject j) throws Exception { Node n=new Node(j.getString("k"),j.getString("t")); n.closed=j.optBoolean("closed",true);n.dmsMarked=j.optInt("dmsMarked",3);JSONArray a=j.getJSONArray("r");for(int i=0;i<a.length();i++){Row r=Row.from(a.getJSONArray(i));r.owner=n;n.rows.add(r);}if(n.kind.equals("dms")&&j.has("dmsHidden")){JSONArray hidden=j.getJSONArray("dmsHidden");for(int i=0;i<n.rows.size();i++)n.rows.get(i).defaultValue=hidden.optBoolean(i,false);}return n; }
+        JSONObject json() throws Exception { JSONObject j=new JSONObject(); j.put("k",kind); j.put("t",text);if(kind.equals("answer")&&!answerName.equals("Ans"))j.put("answerName",answerName);if(!closed)j.put("closed",false);if(kind.equals("dms")){j.put("dmsMarked",dmsMarked);JSONArray hidden=new JSONArray();for(Row row:rows)hidden.put(row.defaultValue);j.put("dmsHidden",hidden);} JSONArray a=new JSONArray(); for(Row r:rows)a.put(r.json());j.put("r",a);return j; }
+        static Node from(JSONObject j) throws Exception { Node n=new Node(j.getString("k"),j.getString("t")); n.answerName=j.optString("answerName","Ans");n.closed=j.optBoolean("closed",true);n.dmsMarked=j.optInt("dmsMarked",3);JSONArray a=j.getJSONArray("r");for(int i=0;i<a.length();i++){Row r=Row.from(a.getJSONArray(i));r.owner=n;n.rows.add(r);}if(n.kind.equals("dms")&&j.has("dmsHidden")){JSONArray hidden=j.getJSONArray("dmsHidden");for(int i=0;i<n.rows.size();i++)n.rows.get(i).defaultValue=hidden.optBoolean(i,false);}return n; }
     }
     public static final class Row {
         public final List<Node> nodes=new ArrayList<>();
@@ -120,7 +122,8 @@ public final class Formula {
     private void insert(Node n){if(cursor.defaultValue){cursor.nodes.clear();index=0;cursor.defaultValue=false;}n.parent=cursor;cursor.nodes.add(index++,n);}
     public void variable(String name){insert(new Node("variable",name));}
     public void symbol(String name){insert(new Node("symbol",name));}
-    public void answer(String value){insert(new Node("answer",value));}
+    public void answer(String value){answer(value,"Ans");}
+    public void answer(String value,String name){Node node=new Node("answer",value);node.answerName=name;insert(node);}
     public void token(String source){insert(new Node("token",source));}
     public void call(String name,int fields){if(fields==0){symbol(name+"()");return;}Node n=new Node("call",name);for(int i=0;i<fields;i++)n.field();insert(n);cursor=n.rows.get(0);index=0;}
     public void grid(int r,int c,boolean vector){Node n=new Node(vector?"vector":"matrix",r+","+c);for(int i=0;i<r*c;i++)n.field();insert(n);cursor=n.rows.get(0);index=0;}
@@ -180,13 +183,23 @@ public final class Formula {
     public void vertical(boolean down){Node o=cursor.owner;if(o!=null&&o.rows.size()>1){int r=o.rows.indexOf(cursor),step=o.kind.equals("matrix")?Integer.parseInt(o.text.split(",")[1]):1;int target=Math.max(0,Math.min(o.rows.size()-1,r+(down?step:-step)));cursor=o.rows.get(target);index=Math.min(index,cursor.nodes.size());}else if(down){while(cursor.owner!=null)exit(true);index=cursor.nodes.size();}else {cursor=root;index=0;}}
     public void delete(){cursor.defaultValue=false;if(index>0)cursor.nodes.remove(--index);else if(cursor.owner!=null){Node o=cursor.owner;int field=o.rows.indexOf(cursor);if(field>0){cursor=o.rows.get(field-1);index=cursor.nodes.size();}else{cursor=o.parent;index=cursor.nodes.indexOf(o);cursor.nodes.remove(index);}}}
     public String save(){try{return root.json().toString();}catch(Exception e){return "[]";}}
+    public JSONObject saveCursor(){
+        JSONObject state=new JSONObject();ArrayList<Integer> path=new ArrayList<>();Row row=cursor;
+        while(row!=root&&row.owner!=null){Node owner=row.owner;path.add(0,owner.rows.indexOf(row));path.add(0,owner.parent.nodes.indexOf(owner));row=owner.parent;}
+        try{state.put("path",new JSONArray(path)).put("index",index).put("rootDefault",root.defaultValue).put("cursorDefault",cursor.defaultValue);}catch(Exception ignored){}
+        return state;
+    }
+    public void restoreCursor(JSONObject state){
+        if(state==null)return;
+        try{Row row=root;JSONArray path=state.optJSONArray("path");if(path!=null)for(int i=0;i+1<path.length();i+=2)row=row.nodes.get(path.getInt(i)).rows.get(path.getInt(i+1));cursor=row;index=Math.max(0,Math.min(row.nodes.size(),state.optInt("index",row.nodes.size())));root.defaultValue=state.optBoolean("rootDefault");cursor.defaultValue=state.optBoolean("cursorDefault");}catch(Exception ignored){cursor=root;index=root.nodes.size();}
+    }
     public void restore(String s){try{root=Row.from(new JSONArray(s));cursor=root;index=root.nodes.size();}catch(Exception e){clear();}}
     public void load(String s){clear();text(s);}
     public void insertSaved(String s){try{Row row=Row.from(new JSONArray(s));for(Node n:row.nodes)insert(n);}catch(Exception e){throw new IllegalArgumentException("无法读取公式",e);}}
     public void insertExpression(String s){s=s.replace('×','*').replace('÷','/').replace('−','-').replace("π","Pi");try{ResultParser parser=new ResultParser(s);Row row=parser.sum();parser.skip();if(parser.i!=s.length())throw new IllegalArgumentException();for(Node n:row.nodes)insert(n);}catch(Exception e){text(s);}}
 
     public static class Box {final float w,a,d;Box(float w,float a,float d){this.w=w;this.a=a;this.d=d;}}
-    public static final class Spot {final Row row;final int index;final float x,y;Spot(Row r,int i,float x,float y){row=r;index=i;this.x=x;this.y=y;}}
+    public static final class Spot {final Row row;final int index;final float x,y,a,d;Spot(Row r,int i,float x,float y){this(r,i,x,y,0,0);}Spot(Row r,int i,float x,float y,float a,float d){row=r;index=i;this.x=x;this.y=y;this.a=a;this.d=d;}}
     public static final class Renderer {
         private final Paint p=new Paint(Paint.ANTI_ALIAS_FLAG);
         public final List<Spot> spots=new ArrayList<>();
@@ -195,7 +208,16 @@ public final class Formula {
         public boolean showCursor=true, stretchRoots=true,closeParen=false;
         public boolean groupThousands=true,groupDecimals=true,decimalComma=false,fractionMultiply=true,descendingPowers=false;
         public int ansStyle=2;
+        public int answerBackground=0xffd4e4e3;
         public float fractionScale=1f, strokeRatio=.05f;
+        private boolean compactFractions;
+        private Renderer answerRenderer;
+        private Renderer answerRenderer(){
+            if(answerRenderer==null)answerRenderer=new Renderer();
+            Renderer r=answerRenderer;r.typeface=typeface;r.color=color;r.groupThousands=groupThousands;r.groupDecimals=groupDecimals;r.decimalComma=decimalComma;r.fractionMultiply=fractionMultiply;r.closeParen=closeParen;r.compactFractions=true;r.strokeRatio=.08f;
+            return r;
+        }
+        private Box answerBox(Node n,float z){Row row=result(n.text);Box value=answerRenderer().measure(row,z*.95f);boolean tall=value.a+value.d>z*1.4f;return new Box(Math.max(value.w+z*.298f,ansStyle==1?textWidth(n.answerName,z*.32f)+z*.16f:0),value.a+z*(tall?.07f:.18f),value.d+z*(ansStyle==1?.45f:tall?.08f:.14f));}
         public android.graphics.Typeface typeface=UiFonts.REGULAR;
         private float textWidth(String s,float size){p.setTypeface(typeface);p.setTextSize(size);return p.measureText(s);}
         private String display(Node n){if(n.kind.equals("symbol"))return n.text.equals("E")?"e":n.text.equals("I")?"i":n.text.equals("Pi")?"π":n.text.equals("RandomReal()")?"Ran#":n.text;return n.text.replace("&&","and").replace("||","or").replace("!=","≠").replace("<=","≤").replace(">=","≥").replace("->","→").replace(":=",":=");}
@@ -236,10 +258,10 @@ public final class Formula {
         private Box measure(Node n,float z){
             if(n.kind.equals("text"))return new Box(textWidth(n.text,z),z*.79f,z*.23f);
             if(n.kind.equals("symbol")||n.kind.equals("variable")||n.kind.equals("token"))return new Box(textWidth(display(n),z),z*.79f,z*.23f);
-            if(n.kind.equals("answer")){if(ansStyle==0)return new Box(textWidth("Ans",z),z*.79f,z*.23f);Box value=measure(result(n.text),z);return new Box(value.w+z*.18f,value.a+z*.06f,value.d+z*(ansStyle==1?.45f:.06f));}
+            if(n.kind.equals("answer")){if(ansStyle==0)return new Box(textWidth(n.answerName,z),z*.79f,z*.23f);return answerBox(n,z);}
             Box b=measure(n.rows.get(0),z);
             switch(n.kind){
-                case "frac": {Box t=measure(n.rows.get(0),z*fractionScale),u=measure(n.rows.get(1),z*fractionScale);return new Box(Math.max(t.w,u.w)+z*.30f,t.a+z*.70f,u.d+z*.92f);}
+                case "frac": {Box t=measure(n.rows.get(0),z*fractionScale),u=measure(n.rows.get(1),z*fractionScale);return new Box(Math.max(t.w,u.w)+z*(compactFractions?.25f:.30f),t.a+z*(compactFractions?.65f:.70f),u.d+z*(compactFractions?.82f:.92f));}
                 case "pow": {Box e=measure(n.rows.get(1),z*.64f);return new Box(b.w+e.w+z*.05f,Math.max(b.a,z*.52f+e.a),b.d);}
                 case "sqrt":return new Box(b.w+z*(n.rows.get(0).empty()?1.01f:.89f),b.a+z*(n.rows.get(0).empty()?.02f:.13f),Math.max(b.d,z*.3f));
                 case "root":return new Box(b.w+z*1.04f,b.a+z*.3f,b.d);
@@ -262,21 +284,29 @@ public final class Formula {
             }
         }
         public void draw(Canvas c,Row r,float x,float baseline,float z){
-            spots.add(new Spot(r,0,x+(r.empty()&&hint(r).isEmpty()?measure(r,z).w:0),baseline));
+            Box firstAnswer=!r.empty()&&r.nodes.get(0).kind.equals("answer")&&ansStyle!=0?measure(r.nodes.get(0),z):null;
+            spots.add(new Spot(r,0,x+(r.empty()&&hint(r).isEmpty()?measure(r,z).w:0),baseline,firstAnswer==null?0:firstAnswer.a,firstAnswer==null?0:firstAnswer.d));
             if(r.empty()&&!hint(r).isEmpty()){Box box=measure(r,z);int old=color;color=0xff56635f;tx(c,hint(r),x+z*.06f,baseline,z);p.setColor(color);p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(z*.025f);c.drawRect(x,baseline-box.a,x+box.w,baseline+box.d,p);p.setStyle(Paint.Style.FILL);color=old;return;}
             if(r.empty()&&!(r.owner!=null&&(r.owner.kind.equals("func")&&!r.owner.text.equals("Abs")||r.owner.kind.equals("binary")||r.owner.kind.equals("scientific")))){p.setColor(color);p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(z*.05f);c.drawRect(x+z*.04f,baseline-z*.86f,x+z*.68f,baseline+z*.14f,p);p.setStyle(Paint.Style.FILL);}
-            float[] spaces=boundaries(r,z);for(int i=0;i<r.nodes.size();i++){Node n=r.nodes.get(i);float space=spaces[i];if(multiplyBefore(r,i))tx(c,"×",x+(space-textWidth("×",z))/2,baseline,z);x+=space;drawNode(c,n,x,baseline,z);x+=measure(n,z).w;spots.add(new Spot(r,i+1,x,baseline));}
+            float[] spaces=boundaries(r,z);for(int i=0;i<r.nodes.size();i++){Node n=r.nodes.get(i);float space=spaces[i];if(multiplyBefore(r,i))tx(c,"×",x+(space-textWidth("×",z))/2,baseline,z);x+=space;drawNode(c,n,x,baseline,z);Box box=measure(n,z);x+=box.w;spots.add(new Spot(r,i+1,x,baseline,n.kind.equals("answer")&&ansStyle!=0?box.a:0,n.kind.equals("answer")&&ansStyle!=0?box.d:0));}
         }
-        public void drawCursor(Canvas c,float z){if(editor==null||!showCursor)return;for(Spot s:spots)if(s.row==editor.cursor&&s.index==editor.index){p.setColor(accent);p.setStrokeWidth(Math.max(2,z*.045f));c.drawLine(s.x+2,s.y-z*.85f,s.x+2,s.y+z*.18f,p);break;}}
+        public void drawCursor(Canvas c,float z){if(editor==null||!showCursor)return;for(Spot s:spots)if(s.row==editor.cursor&&s.index==editor.index){p.setColor(accent);p.setStrokeWidth(Math.max(2,z*.045f));c.drawLine(s.x+2,s.y-(s.a>0?s.a:z*.85f),s.x+2,s.y+(s.a>0?s.d:z*.18f),p);break;}}
         private void tx(Canvas c,String t,float x,float y,float z){p.setTypeface(typeface);p.setColor(color);p.setTextSize(z);p.setStyle(Paint.Style.FILL);c.drawText(t,x,y,p);}
         private void line(Canvas c,float x,float y,float xx,float yy,float z){p.setColor(color);p.setStrokeWidth(Math.max(1,z*strokeRatio));c.drawLine(x,y,xx,yy,p);}
         private void drawNode(Canvas c,Node n,float x,float y,float z){
             if(n.kind.equals("text")){tx(c,decimalComma&&n.text.equals(".")?",":n.text,x,y,z);return;}
             if(n.kind.equals("symbol")||n.kind.equals("variable")||n.kind.equals("token")){tx(c,display(n),x,y,z);return;}
-            if(n.kind.equals("answer")){if(ansStyle==0){tx(c,"Ans",x,y,z);return;}Box box=measure(n,z);p.setColor(color);p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(z*.025f);c.drawRoundRect(x,y-box.a,x+box.w,y+box.d,z*.09f,z*.09f,p);p.setStyle(Paint.Style.FILL);draw(c,result(n.text),x+z*.09f,y,z);if(ansStyle==1)tx(c,"Ans",x+box.w/2-textWidth("Ans",z*.32f)/2,y+box.d-z*.08f,z*.32f);return;}
+            if(n.kind.equals("answer")){
+                if(ansStyle==0){tx(c,n.answerName,x,y,z);return;}
+                Box box=measure(n,z);float radius=z*.16f;p.setStyle(Paint.Style.FILL);p.setColor(answerBackground);c.drawRoundRect(x,y-box.a,x+box.w,y+box.d,radius,radius,p);
+                float inset=z*.14f;p.setColor(0xffbfcecd);c.drawRoundRect(x+inset,y-box.a+inset,x+box.w-inset,y+box.d-inset,radius*.8f,radius*.8f,p);
+                p.setColor(color);p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(z*.075f);c.drawRoundRect(x,y-box.a,x+box.w,y+box.d,radius,radius,p);p.setStyle(Paint.Style.FILL);
+                Renderer contents=answerRenderer();Row row=result(n.text);Box value=contents.measure(row,z*.95f);contents.spots.clear();contents.draw(c,row,x+(box.w-value.w)/2,y+(value.a+value.d>z*1.4f?z*.10f:0),z*.95f);
+                if(ansStyle==1)tx(c,n.answerName,x+box.w/2-textWidth(n.answerName,z*.32f)/2,y+box.d-z*.08f,z*.32f);return;
+            }
             Row r=n.rows.get(0);Box b=measure(r,z),all=measure(n,z);
             switch(n.kind){
-                case "frac":{float s=z*fractionScale;Box t=measure(r,s),u=measure(n.rows.get(1),s);float width=all.w-z*.14f;x+=z*.14f;draw(c,r,x+(width-t.w)/2,y-z*.70f,s);line(c,x+z*.02f,y-z*.35f,x+width-z*.02f,y-z*.35f,z);draw(c,n.rows.get(1),x+(width-u.w)/2,y+z*.72f,s);break;}
+                case "frac":{float s=z*fractionScale;Box t=measure(r,s),u=measure(n.rows.get(1),s);float width=all.w-z*.14f;x+=z*(compactFractions?.07f:.14f);draw(c,r,x+(width-t.w)/2,y-z*(compactFractions?.65f:.70f),s);line(c,x+z*.02f,y-z*(compactFractions?.31f:.35f),x+width-z*.02f,y-z*(compactFractions?.31f:.35f),z);draw(c,n.rows.get(1),x+(width-u.w)/2,y+z*(compactFractions?.67f:.72f),s);break;}
                 case "pow":draw(c,r,x,y,z);draw(c,n.rows.get(1),x+b.w+z*.05f,y-z*.52f,z*.64f);break;
                 case "sqrt":radical(c,x,y,z,b,all.w,r.empty());draw(c,r,x+z*(r.empty()?.84f:.72f),y,z);break;
                 case "root":draw(c,n.rows.get(1),x,y-z*.62f,z*.45f);radical(c,x+z*.2f,y,z,b,all.w-z*.2f,r.empty());draw(c,r,x+z*.98f,y,z);break;

@@ -44,7 +44,8 @@ final class SkinPicker {
   }
   tabs.addView(strip);page.addView(tabs,new LinearLayout.LayoutParams(-1,page.dp(46)));
   int width=app.getResources().getDisplayMetrics().widthPixels;
-  pictureWidth=width-page.dp(95);pictureHeight=pictureWidth*2;
+  int height=app.getResources().getDisplayMetrics().heightPixels;
+  pictureWidth=Math.max(page.dp(60),Math.min(width-page.dp(95),Math.max(page.dp(120),height-page.dp(256))/2));pictureHeight=pictureWidth*2;
   pager=new Pager(app,Math.max(pictureWidth+page.dp(28),width-page.dp(42)));
   pager.setPadding((width-pager.pageWidth)/2,0,(width-pager.pageWidth)/2,0);pager.setClipToPadding(false);
   LinearLayout pages=new LinearLayout(app);
