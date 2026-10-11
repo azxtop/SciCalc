@@ -3,7 +3,7 @@ android {
     namespace 'com.az.scicalc'
     compileSdk 36
     defaultConfig {
-        applicationId 'com.az.scicalc'; minSdk 31; targetSdk 35; versionCode 25; versionName '1.1.0'
+        applicationId 'com.az.scicalc'; minSdk 31; targetSdk 35; versionCode 26; versionName '1.1.1'
         buildConfigField 'String', 'GITHUB_REPOSITORY_URL', '"https://github.com/azxtop/SciCalc"'
     }
     buildFeatures { buildConfig = true }
